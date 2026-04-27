@@ -4,35 +4,56 @@ Agent skills that teach coding agents how to build with the [Vectara](https://ve
 
 ## What are Agent Skills?
 
-Agent skills are instruction files that help AI coding agents (Claude Code, Cursor, Copilot, etc.) understand how to use the Vectara platform. Instead of relying on potentially outdated training data, the agent gets current, accurate patterns.
+Agent skills are instruction files that help AI coding agents (Claude Code, Cursor, Codex, etc.) understand how to use the Vectara platform. Instead of relying on potentially outdated training data, the agent gets current, accurate patterns.
 
 ## Available Skills
 
 | Skill | Description |
 |-------|-------------|
-| [agents](agents/SKILL.md) | Build AI agents with tools, sessions, and instructions using the v2 API |
+| [agents](skills/agents/SKILL.md) | Build AI agents with tools, sessions, and instructions using the v2 API |
 
-## Quick Start
+## Install
 
-### Claude Code
-
-```bash
-curl -o .claude/skills/vectara-agents.md https://raw.githubusercontent.com/vectara/agent-skills/main/agents/SKILL.md
-```
-
-### Cursor
+### One-liner (all platforms)
 
 ```bash
-curl -o .cursor/rules/vectara-agents.md https://raw.githubusercontent.com/vectara/agent-skills/main/agents/SKILL.md
+npx skills add vectara/agent-skills
 ```
 
-### Manual
+### Manual install
 
-Copy the contents of the skill's `SKILL.md` into your AI coding agent's instructions or rules directory.
+#### Claude Code
+
+Copy skill files into `.claude/skills/` in your project:
+
+```bash
+mkdir -p .claude/skills
+curl -o .claude/skills/vectara-agents.md \
+  https://raw.githubusercontent.com/vectara/agent-skills/main/skills/agents/SKILL.md
+```
+
+#### Cursor
+
+Copy skill files into `.cursor/rules/` in your project:
+
+```bash
+mkdir -p .cursor/rules
+curl -o .cursor/rules/vectara-agents.md \
+  https://raw.githubusercontent.com/vectara/agent-skills/main/skills/agents/SKILL.md
+```
+
+#### Codex
+
+Copy skill files into `.agents/skills/` in your project:
+
+```bash
+mkdir -p .agents/skills
+curl -o .agents/skills/vectara-agents.md \
+  https://raw.githubusercontent.com/vectara/agent-skills/main/skills/agents/SKILL.md
+```
 
 ## Documentation
 
-For full Vectara documentation:
 - [docs.vectara.com](https://docs.vectara.com)
 - [LLM-friendly docs](https://docs.vectara.com/llms.txt)
 

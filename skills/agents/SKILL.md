@@ -12,7 +12,7 @@ You are helping a developer build with the Vectara platform. Vectara is an enter
 ## Critical Rules
 
 1. **Always use the v2 API.** The base URL is `https://api.vectara.io/v2/`. Never use `/v1/` endpoints — they are deprecated.
-2. **Authentication**: Use `x-api-key` header with an API key, or `Authorization: Bearer <token>` with an OAuth token. Never use both.
+2. **Authentication**: Use either `x-api-key` header with an API key, or `Authorization: Bearer <token>` with an OAuth token. Both are valid — use whichever the developer has. Never use both simultaneously.
 3. **Agents are a first-class resource.** Create them via `POST /v2/agents`, not by stitching together query calls manually.
 4. **Every agent needs three things:**
    - `tool_configurations` — at least one tool (corpora_search, web_search, or custom)
@@ -134,8 +134,28 @@ curl -s -X POST https://api.vectara.io/v2/agents/$AGENT_KEY/sessions/$SESSION_KE
 The agent responds with a list of events:
 - `input_message` — your original message
 - `thinking` — agent's reasoning process
-- `tool_input` / `tool_output` — tool calls and results
+- `tool_input` / `tool_output` — tool calls and results. Note: corpus search results are in `tool_output.search_results` (not `results`)
 - `agent_output` — the final response
+
+## Corpus Search Generation
+
+By default, the corpora_search tool has `generation.enabled: false`. To get RAG summaries in tool output, enable it explicitly:
+
+```json
+{
+  "type": "corpora_search",
+  "query_configuration": {
+    "search": {
+      "corpora": [{"corpus_key": "my-corpus"}],
+      "limit": 10
+    },
+    "generation": {
+      "enabled": true,
+      "max_used_search_results": 5
+    }
+  }
+}
+```
 
 ## Common Mistakes to Avoid
 
@@ -144,6 +164,8 @@ The agent responds with a list of events:
 - Forgetting `output_parser: {"type": "default"}` in `first_step`
 - Sending messages without creating a session first
 - Putting `limit` inside `corpora[]` instead of in `search{}`
+- Looking for `tool_output.results` instead of `tool_output.search_results` for corpus search
+- Not enabling `generation.enabled: true` in query_configuration when you want RAG summaries
 
 ## References
 
