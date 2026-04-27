@@ -1,5 +1,5 @@
 ---
-name: vectara
+name: vectara-agents
 description: Build AI agents with the Vectara platform — create agents, configure tools, manage sessions, and search corpora using the v2 API.
 tags: [vectara, agents, rag, ai, api]
 compatibility: [claude-code, cursor, copilot, cline, windsurf]
@@ -9,9 +9,13 @@ compatibility: [claude-code, cursor, copilot, cline, windsurf]
 
 You are helping a developer build with the Vectara platform. Vectara is an enterprise agentic platform for building trusted AI agents with retrieval augmented generation (RAG).
 
+## API Reference
+
+The full OpenAPI spec is available at `https://api.vectara.io/v2/openapi.json`. Fetch it when you need exact request/response schemas.
+
 ## Critical Rules
 
-1. **Always use the v2 API.** The base URL is `https://api.vectara.io/v2/`. Never use `/v1/` endpoints — they are deprecated.
+1. **Always use the v2 API.** The base URL is `https://api.vectara.io/v2/`.
 2. **Authentication**: Use either `x-api-key` header with an API key, or `Authorization: Bearer <token>` with an OAuth token. Both are valid — use whichever the developer has. Never use both simultaneously.
 3. **Agents are a first-class resource.** Create them via `POST /v2/agents`, not by stitching together query calls manually.
 4. **Every agent needs three things:**
@@ -159,7 +163,6 @@ By default, the corpora_search tool has `generation.enabled: false`. To get RAG 
 
 ## Common Mistakes to Avoid
 
-- Using `/v1/query` instead of the agents API
 - Using `corpus_id` (number) instead of `corpus_key` (string)
 - Forgetting `output_parser: {"type": "default"}` in `first_step`
 - Sending messages without creating a session first
@@ -171,6 +174,7 @@ By default, the corpora_search tool has `generation.enabled: false`. To get RAG 
 
 For detailed documentation, fetch these pages:
 
+### Agents
 - [Agent Overview](https://docs.vectara.com/docs/agents/agents.md)
 - [Agent Quickstart](https://docs.vectara.com/docs/agents/agents-quickstart.md)
 - [Create Agent Examples](https://docs.vectara.com/docs/agents/create-agent-examples.md)
@@ -183,4 +187,15 @@ For detailed documentation, fetch these pages:
 - [Sub-agents](https://docs.vectara.com/docs/agents/subagents.md)
 - [MCP](https://docs.vectara.com/docs/agents/model-context-protocol.md)
 - [Create Agent API](https://docs.vectara.com/docs/api-reference/agent-apis/create-agent.md)
+
+### Search and Retrieval
+- [Search Quick Start](https://docs.vectara.com/docs/search-and-retrieval/search-quick-start.md)
+- [Hybrid Search](https://docs.vectara.com/docs/search-and-retrieval/hybrid-search.md)
+- [Query a Corpus](https://docs.vectara.com/docs/rest-api/query-corpus.md)
+- [Search a Corpus](https://docs.vectara.com/docs/rest-api/search-corpus.md)
+- [Filters](https://docs.vectara.com/docs/search-and-retrieval/filters.md)
+- [Reranking](https://docs.vectara.com/docs/search-and-retrieval/rerankers/vectara-multi-lingual-reranker.md)
+
+### API Reference
+- [OpenAPI Spec](https://api.vectara.io/v2/openapi.json)
 - [Full Documentation Index](https://docs.vectara.com/llms.txt)
