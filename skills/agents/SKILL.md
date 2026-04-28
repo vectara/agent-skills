@@ -1,6 +1,6 @@
 ---
 name: vectara-agents
-description: Build AI agents with the Vectara platform — create agents, configure tools, manage sessions, and search corpora using the v2 API.
+description: Build AI agents with the Vectara platform — create agents, configure tools, manage sessions, and search corpora.
 tags: [vectara, agents, rag, ai, api]
 compatibility: [claude-code, cursor, copilot, cline, windsurf]
 ---
@@ -13,9 +13,13 @@ You are helping a developer build with the Vectara platform. Vectara is an enter
 
 The full OpenAPI spec is available at `https://api.vectara.io/v2/openapi.json`. Fetch it when you need exact request/response schemas.
 
+## Documentation Access
+
+You can fetch any Vectara documentation page as markdown by appending `.md` to its URL. For example: `https://docs.vectara.com/docs/agents/agents.md`. The full documentation index is at `https://docs.vectara.com/llms.txt`. When you need detailed information about a Vectara feature, fetch the relevant markdown page directly.
+
 ## Critical Rules
 
-1. **Always use the v2 API.** The base URL is `https://api.vectara.io/v2/`.
+1. **API base URL** is `https://api.vectara.io/v2/`.
 2. **Authentication**: Use either `x-api-key` header with an API key, or `Authorization: Bearer <token>` with an OAuth token. Both are valid — use whichever the developer has. Never use both simultaneously.
 3. **Agents are a first-class resource.** Create them via `POST /v2/agents`, not by stitching together query calls manually.
 4. **Every agent needs three things:**
