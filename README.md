@@ -4,40 +4,56 @@ Agent skills that teach coding agents how to build with the [Vectara](https://ve
 
 ## What are Agent Skills?
 
-Agent skills are instruction files that help AI coding agents (Claude Code, Cursor, Copilot, etc.) understand how to use the Vectara platform. Instead of relying on potentially outdated training data, the agent gets current, accurate patterns for building Vectara agents.
+Agent skills are instruction files that help AI coding agents (Claude Code, Cursor, Codex, etc.) understand how to use the Vectara platform. Instead of relying on potentially outdated training data, the agent gets current, accurate patterns.
 
-## Quick Start
+## Available Skills
 
-### Claude Code
+| Skill | Description |
+|-------|-------------|
+| [agents](skills/agents/SKILL.md) | Build AI agents with tools, sessions, and instructions using the v2 API |
+
+## Install
+
+### One-liner (all platforms)
 
 ```bash
-# Copy the skill to your project
-curl -o .claude/skills/vectara.md https://raw.githubusercontent.com/vectara/agent-skills/main/SKILL.md
+npx skills add vectara/agent-skills
 ```
 
-### Cursor
+### Manual install
+
+#### Claude Code
+
+Copy skill files into `.claude/skills/` in your project:
 
 ```bash
-curl -o .cursor/rules/vectara.md https://raw.githubusercontent.com/vectara/agent-skills/main/SKILL.md
+mkdir -p .claude/skills
+curl -o .claude/skills/vectara-agents.md \
+  https://raw.githubusercontent.com/vectara/agent-skills/main/skills/agents/SKILL.md
 ```
 
-### Manual
+#### Cursor
 
-Copy the contents of `SKILL.md` into your AI coding agent's instructions or rules directory.
+Copy skill files into `.cursor/rules/` in your project:
 
-## What's Included
+```bash
+mkdir -p .cursor/rules
+curl -o .cursor/rules/vectara-agents.md \
+  https://raw.githubusercontent.com/vectara/agent-skills/main/skills/agents/SKILL.md
+```
 
-The skill teaches agents to:
+#### Codex
 
-- Use the **v2 API** (never the deprecated v1)
-- Create agents with proper `tool_configurations`, `first_step`, and `model` settings
-- Configure corpus search, web search, and other built-in tools
-- Manage sessions and send messages correctly
-- Avoid common mistakes (wrong auth, missing fields, deprecated endpoints)
+Copy skill files into `.agents/skills/` in your project:
+
+```bash
+mkdir -p .agents/skills
+curl -o .agents/skills/vectara-agents.md \
+  https://raw.githubusercontent.com/vectara/agent-skills/main/skills/agents/SKILL.md
+```
 
 ## Documentation
 
-For full Vectara documentation:
 - [docs.vectara.com](https://docs.vectara.com)
 - [LLM-friendly docs](https://docs.vectara.com/llms.txt)
 
