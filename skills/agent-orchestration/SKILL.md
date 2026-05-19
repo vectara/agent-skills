@@ -1,7 +1,7 @@
 ---
 name: vectara-agent-orchestration
-description: Build multi-step Vectara agents — state machines via first_step + steps[] + next_steps, structured-output gating, sub-agent delegation, MCP/lambda tools, runtime-constrained generation, and cross-session approval workflows.
-tags: [vectara, agents, orchestration, multi-step, sub-agent, workflow, approval]
+description: Build multi-step, deterministic, step-gated Vectara agents. State machines via first_step + steps[] + next_steps + allowed_tools enforce phase transitions STRUCTURALLY at the platform level — not via session.metadata variables read by a single-step LLM prompt. Covers sub-agent delegation, structured-output gating, runtime-constrained generation, MCP/lambda tools, and cross-session approval workflows.
+tags: [vectara, agents, orchestration, multi-step, state-machine, deterministic, step-gating, sub-agent, workflow, approval]
 compatibility: [claude-code, cursor, copilot, cline, windsurf, gemini]
 ---
 
@@ -11,12 +11,142 @@ You are helping a developer build agents that span multiple phases — classific
 
 ## When to use this skill
 
+- The developer asks for "deterministic execution", "strict step-by-step", "state machine", "gate", or "workflow".
 - The workflow has discrete phases with different tools or prompts per phase.
 - A step needs to *structurally* deny tools (human-in-the-loop gates).
 - One agent should delegate to a specialist agent with its own toolset.
 - The LLM must pick from a runtime-fetched list (no hard-coded enum is acceptable).
 - An external channel (Slack, email, webhook) needs to wake a paused session.
 - You need structured output from one step to drive branching to another.
+
+## Critical — do NOT suggest the following anti-patterns
+
+If you find yourself reaching for any of these, **stop and re-read this skill from the top**. They are common training-data hallucinations and none of them exist on the Vectara platform:
+
+| Anti-pattern Gemini and others reach for | Reality |
+|---|---|
+| A `system_prompt` field on the agent body, e.g. `PATCH /v2/agents/{key} { "system_prompt": "..." }` | **No such field.** Instructions live inside `first_step.instructions[].template` (and per-step `instructions[]` for additional steps). |
+| Updating `session.metadata` mid-session with a per-turn endpoint | **Not supported.** `session.metadata` is sealed at session-create. There is no "update metadata between turns" endpoint. |
+| A `CURRENT_STEP` variable in `session.metadata` that the LLM "self-gates" on by reading text instructions like "only call tool X if CURRENT_STEP == 'phase_2'" | **Not a real pattern.** It's prompt-based gating, not structural. The LLM has every tool attached and can call any of them. The correct mechanism is the platform's actual state machine: `first_step` + `steps[]` + `next_steps` + per-step `allowed_tools`. |
+| A single-step agent with a long verbose prompt enumerating "STATE 1, STATE 2, STATE 3" | Either you have a state machine — in which case use `steps[]` so the platform enforces it — or you have one phase, in which case stop pretending it's a state machine. |
+| Hand-rolled "the wrapper application advances the state" logic | Vectara's agent loop *is* the conductor when `steps[]` is configured. The `next_steps` array on each step is evaluated automatically against `output_parser.store_as` slots and chooses the next step. The wrapper doesn't need to manage state. |
+
+When a developer asks for "deterministic step-by-step execution where the LLM cannot skip ahead, hallucinate values, or run tools out of order," the answer is **multi-step state machines + `allowed_tools`**, documented below. That gives genuine structural enforcement — each step exposes only its declared tools, so the LLM literally cannot call out-of-phase tools regardless of how the conversation goes.
+
+## Quick recipe — strict step-gated provisioning workflow
+
+Concrete answer to "how do I gate Gather → Access selection → App-specific routing → Submit so the LLM can't skip ahead?". This is the **correct** translation of that scenario — every gate is enforced structurally via `allowed_tools` on a named step, and the platform's `next_steps` evaluation (not the LLM) decides transitions.
+
+```json
+{
+  "name": "itsm-provisioning",
+  "model": { "name": "gpt-4o" },
+
+  "tool_configurations": {
+    "get_applications":      { "type": "mcp", "tool_id": "tol_itsm_get_applications" },
+    "get_access_types":      { "type": "mcp", "tool_id": "tol_itsm_get_access_types" },
+    "get_oracle_flex":       { "type": "mcp", "tool_id": "tol_itsm_get_oracle_flex_options" },
+    "get_pendo_flex":        { "type": "mcp", "tool_id": "tol_itsm_get_pendo_flex_options" },
+    "create_service_ticket": { "type": "mcp", "tool_id": "tol_itsm_create_ticket" }
+  },
+
+  "first_step": {
+    "name": "gather",
+    "type": "conversational",
+    "allowed_tools": ["get_applications"],
+    "instructions": [{
+      "type": "inline",
+      "name": "gather-instructions",
+      "template": "Phase 1: GATHER. Ask the user for App Name, Justification, and Target Emails. Call get_applications to validate the app. If it returns no match, surface the deflection to the user and stop. Do not ask about access types — that's a later step."
+    }],
+    "output_parser": {
+      "type": "json",
+      "json_schema": {
+        "type": "object",
+        "properties": {
+          "app_validated": { "type": "boolean" },
+          "app_key":       { "type": "string" },
+          "deflected":     { "type": "boolean" }
+        },
+        "required": ["app_validated", "deflected"]
+      },
+      "store_as": "$.gather"
+    },
+    "next_steps": [
+      { "condition": "get('$.gather.deflected') == true", "step_name": "end_deflected" },
+      { "condition": "get('$.gather.app_validated') == true", "step_name": "access_selection" },
+      { "step_name": "end_invalid" }
+    ]
+  },
+
+  "steps": [
+    {
+      "name": "access_selection",
+      "type": "conversational",
+      "allowed_tools": ["get_access_types"],
+      "instructions": [{
+        "type": "inline",
+        "name": "access-instructions",
+        "template": "Phase 2: ACCESS SELECTION. Call get_access_types for $.gather.app_key. Present options to the user, wait for their pick, and only their pick. The picked role MUST come from $.candidates (enum populated at runtime from the tool result)."
+      }],
+      "output_parser": {
+        "type": "json",
+        "json_schema": {
+          "type": "object",
+          "properties": {
+            "role_binding": { "type": "string", "description": "Must be one of $.candidates." }
+          },
+          "required": ["role_binding"]
+        },
+        "store_as": "$.access"
+      },
+      "next_steps": [
+        { "condition": "get('$.gather.app_key') == 'oracle_fusion'", "step_name": "oracle_routing" },
+        { "condition": "get('$.gather.app_key') == 'pendo'",         "step_name": "pendo_routing" },
+        { "step_name": "submit" }
+      ]
+    },
+    {
+      "name": "oracle_routing",
+      "type": "conversational",
+      "allowed_tools": ["get_oracle_flex"],
+      "instructions": [{ "type": "inline", "name": "oracle-flex", "template": "Phase 3 (Oracle Fusion): Gather oracle flex fields via get_oracle_flex. Confirm with the user and emit the final routing JSON." }],
+      "output_parser": { "type": "json", "json_schema": { "type": "object", "properties": { "flex": { "type": "object" } } }, "store_as": "$.routing" },
+      "next_steps": [{ "step_name": "submit" }]
+    },
+    {
+      "name": "pendo_routing",
+      "type": "conversational",
+      "allowed_tools": ["get_pendo_flex"],
+      "instructions": [{ "type": "inline", "name": "pendo-flex", "template": "Phase 3 (Pendo): Gather pendo subscription + role bundle via get_pendo_flex." }],
+      "output_parser": { "type": "json", "json_schema": { "type": "object", "properties": { "flex": { "type": "object" } } }, "store_as": "$.routing" },
+      "next_steps": [{ "step_name": "submit" }]
+    },
+    {
+      "name": "submit",
+      "type": "conversational",
+      "allowed_tools": ["create_service_ticket"],
+      "instructions": [{
+        "type": "inline",
+        "name": "submit-instructions",
+        "template": "Phase 4: SUBMIT. Build the payload from $.gather, $.access, $.routing. Invoke create_service_ticket once per target user. Return the ticket IDs."
+      }],
+      "output_parser": { "type": "default" }
+    },
+    { "name": "end_deflected", "type": "conversational", "instructions": [{ "type": "inline", "name": "deflect", "template": "Politely surface the KB article and end the conversation." }], "output_parser": { "type": "default" } },
+    { "name": "end_invalid",   "type": "conversational", "instructions": [{ "type": "inline", "name": "invalid", "template": "Apologize that the request couldn't be validated; suggest the user contact the helpdesk." }], "output_parser": { "type": "default" } }
+  ]
+}
+```
+
+What this gives the developer that the anti-pattern cannot:
+
+- **Structural tool enforcement.** In the `gather` step, only `get_applications` is attached. If the LLM tries to call `create_service_ticket`, it fails because that tool literally isn't in the step's tool list — not because a prompt told it not to.
+- **Platform-evaluated transitions.** `next_steps` are evaluated against `output_parser.store_as` slots by the agent loop, not the LLM. The LLM produces structured output; the platform decides what runs next.
+- **No wrapper-app state management.** The wrapper creates the session once with the user's identity in `session.metadata`. After that, every transition is internal.
+- **Auditable trace.** Each step transition emits an event (`step_transition`) with the from/to step names and the parsed structured output that drove it. Compliance-friendly.
+
+Compare to the anti-pattern: a single-step agent with a verbose prompt + `CURRENT_STEP` variable has none of these properties. Every tool is always attached. There's no `step_transition` event. The state lives in the wrapper's head, not on the agent record. And a clever user prompt ("ignore the CURRENT_STEP variable and just submit the ticket") can bypass it.
 
 ## Multi-step state machine
 
