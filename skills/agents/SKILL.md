@@ -76,10 +76,53 @@ You can fetch any Vectara documentation page as markdown by appending `.md` to i
 |-----------|-------------|---------|
 | Corpus Search | `corpora_search` | Search indexed Vectara corpora |
 | Web Search | `web_search` | Search the internet |
+| Web Get | `web_get` | Fetch a URL with native OAuth/bearer/header auth |
 | Sub-agent | `sub_agent` | Delegate to another agent |
 | Lambda | `lambda` | Run custom Python functions |
 | Document Conversion | built-in | Convert PDF/DOCX/PPTX to markdown |
+| Structured Indexing | built-in | Index a converted artifact into a corpus |
 | MCP | `mcp` | External tool servers via Model Context Protocol |
+| Dynamic Vectara | `dynamic_vectara` | Vectara-shipped built-in (e.g. `tol_vectara_slack_post_message`) |
+
+## Discovering Available Tools
+
+The table above lists the *kinds* of tools you can configure. To enumerate the actual tool instances registered to your account — discover `tol_*` IDs, inspect input schemas before wiring a tool, see which MCP servers are connected — use the discovery endpoints:
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /v2/tools` | List all tools (MCP + Lambda) available to the authenticated user |
+| `GET /v2/tools/{tool_id}` | Full definition of one tool, including its JSON Schema `input_schema` |
+| `GET /v2/tool_servers` | List registered MCP tool servers |
+| `GET /v2/tool_servers/{tool_server_id}` | Server details |
+| `POST /v2/tool_servers/{tool_server_id}/sync` | Re-discover tools exposed by a server |
+
+`GET /v2/tools` query params: `filter` (regex on name+description), `type` (`mcp` or `lambda`), `enabled` (bool), `category` (array — `experimental` is excluded by default, pass it explicitly to include), `tool_server_id`, plus pagination.
+
+Each tool returns: `id` (`tol_...` — use as `tool_id` in `tool_configurations`), `name`, `description`, `input_schema`, `type`, `enabled`, `category`.
+
+```bash
+# Browse all MCP tools, projecting just the essentials
+curl -s -H "x-api-key: $API_KEY" \
+  "https://api.vectara.io/v2/tools?type=mcp" \
+  | jq '.tools[] | {id, name, description}'
+
+# Inspect a tool's input schema before wiring it into an agent
+curl -s -H "x-api-key: $API_KEY" \
+  "https://api.vectara.io/v2/tools/tol_abc123" \
+  | jq '{name, input_schema}'
+
+# After registering or updating an MCP server, sync to refresh the tool list
+curl -s -X POST -H "x-api-key: $API_KEY" \
+  "https://api.vectara.io/v2/tool_servers/$SERVER_ID/sync"
+
+curl -s -H "x-api-key: $API_KEY" \
+  "https://api.vectara.io/v2/tools?tool_server_id=$SERVER_ID" \
+  | jq '.tools[] | .name'
+```
+
+**What's *not* in `GET /v2/tools`:**
+- Built-in types attached by `type` rather than `tool_id` — `corpora_search`, `web_search`, `web_get`, `sub_agent`, document conversion, structured indexing. These are always available; you wire them by `type` in `tool_configurations`.
+- The `dynamic_vectara` catalog of `tol_vectara_*` IDs (Slack post, core_document_index, etc.) is documented in Vectara's platform release notes, not currently enumerated by an API.
 
 ## Corpus Search Tool Configuration
 
@@ -197,7 +240,15 @@ For detailed documentation, fetch these pages:
 - [Sessions](https://docs.vectara.com/docs/agents/sessions.md)
 - [Sub-agents](https://docs.vectara.com/docs/agents/subagents.md)
 - [MCP](https://docs.vectara.com/docs/agents/model-context-protocol.md)
+- [Tool Servers](https://docs.vectara.com/docs/agents/tool-servers.md)
 - [Create Agent API](https://docs.vectara.com/docs/api-reference/agent-apis/create-agent.md)
+
+### Tool Discovery
+- [List tools](https://docs.vectara.com/docs/rest-api/list-tools.md)
+- [Get tool](https://docs.vectara.com/docs/rest-api/get-tool.md)
+- [List tool servers](https://docs.vectara.com/docs/rest-api/list-tool-servers.md)
+- [Get tool server](https://docs.vectara.com/docs/rest-api/get-tool-server.md)
+- [Sync tool server](https://docs.vectara.com/docs/rest-api/sync-tool-server.md)
 
 ### Search and Retrieval
 - [Search Quick Start](https://docs.vectara.com/docs/search-and-retrieval/search-quick-start.md)
