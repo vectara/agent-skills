@@ -162,6 +162,97 @@ curl -s -H "x-api-key: $API_KEY" \
 }
 ```
 
+## Creating Lambda Tools
+
+Lambda tools are custom Python functions that agents can call. They run in a sandboxed Python 3.12 runtime — no network, no filesystem writes, no `pip install`, no system commands. Allowed stdlib modules: `json`, `math`, `datetime`, `collections`, `itertools`, `functools`, `re`, `time`, `typing`.
+
+**Two rules that make the rest work:**
+
+1. The entry point function MUST be named `process`. Anything else 422s.
+2. Input and output schemas are *auto-discovered from Python type annotations*. Parameters with default values become optional. The return must be a JSON-serializable dict.
+
+```python
+def process(order_count: int, total_revenue: float, days_active: int = 1) -> dict:
+    score = (order_count * 10 + total_revenue * 0.1) / days_active
+    tier = 'gold' if score > 20 else 'silver' if score > 10 else 'bronze'
+    return {'score': round(score, 2), 'tier': tier}
+```
+
+### Create the tool
+
+```bash
+curl -X POST https://api.vectara.io/v2/tools \
+  -H "x-api-key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "lambda",
+    "language": "python",
+    "name": "customer_score_calculator",
+    "title": "Customer Score Calculator",
+    "description": "Calculates a customer score from order count, revenue, and days active. Returns score and tier (bronze/silver/gold).",
+    "code": "def process(order_count: int, total_revenue: float, days_active: int = 1) -> dict:\n    score = (order_count * 10 + total_revenue * 0.1) / days_active\n    tier = '"'"'gold'"'"' if score > 20 else '"'"'silver'"'"' if score > 10 else '"'"'bronze'"'"'\n    return {'"'"'score'"'"': round(score, 2), '"'"'tier'"'"': tier}",
+    "execution_configuration": {
+      "max_execution_time_seconds": 30,
+      "max_memory_mb": 100
+    }
+  }'
+```
+
+Response includes the assigned `id` (`tol_*`), plus the auto-discovered `input_schema` and `output_schema`. `execution_configuration` limits: `max_execution_time_seconds` 1–300 (default 30), `max_memory_mb` 10–1024 (default 100).
+
+### Test before creating
+
+`POST /v2/tools/test` validates the code, discovers the schema, and runs it against sample input — without persisting the tool. Use this to iterate before committing to a `tol_*` ID.
+
+```bash
+curl -X POST https://api.vectara.io/v2/tools/test \
+  -H "x-api-key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "language": "python",
+    "code": "def process(order_count: int, total_revenue: float) -> dict:\n    return {\"score\": order_count * 10 + total_revenue * 0.1}",
+    "test_input": {"order_count": 10, "total_revenue": 500}
+  }'
+```
+
+Required body fields: `code`, `test_input`. Response includes `validation.status` (`valid`/`invalid` + errors), the discovered `input_schema`/`output_schema`, and `execution.output` / `latency_millis` / `memory_used_mb`.
+
+### Test a deployed tool
+
+```bash
+curl -X POST https://api.vectara.io/v2/tools/tol_abc123/test \
+  -H "x-api-key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input": {"order_count": 50, "total_revenue": 5000, "days_active": 30}}'
+```
+
+### Update, disable, delete
+
+`PATCH /v2/tools/{tool_id}` to update code or metadata (schemas re-discovered on update). Disable by patching `{"type": "lambda", "enabled": false}`. `DELETE /v2/tools/{tool_id}` removes it.
+
+### Input-schema gotchas
+
+- **Object parameters must use `TypedDict`** — bare `dict` and `Dict[K, V]` annotations are rejected, because the platform can't infer a JSON Schema from them.
+- **Bare `list` parameters break the agent loop with a schema error.** Take a `str` and `json.loads` it inside the function, or use a typed `List[T]`. (See `vectara-agent-orchestration` for context.)
+- Default values make a parameter optional; without a default it's required.
+
+### Wire the lambda into an agent
+
+```json
+{
+  "type": "lambda",
+  "tool_id": "tol_abc123",
+  "argument_override": {
+    "customer_tier": "enterprise",
+    "query": { "$ref": "session.metadata.search_query" }
+  }
+}
+```
+
+`argument_override` locks fields the LLM shouldn't control and can pull dynamic values via `$ref` (see `vectara-agent-auth-and-secrets`).
+
+For reusable, governed wiring across agents, create a `LambdaToolConfiguration` once via `POST /v2/tools/{tool_id}/configurations` (returns a `tcf_*` id) and reference it from agents with `{"type": "lambda", "configuration_id": "tcf_..."}`.
+
 ## Chat Flow (3 Steps)
 
 ```bash
@@ -249,6 +340,16 @@ For detailed documentation, fetch these pages:
 - [List tool servers](https://docs.vectara.com/docs/rest-api/list-tool-servers.md)
 - [Get tool server](https://docs.vectara.com/docs/rest-api/get-tool-server.md)
 - [Sync tool server](https://docs.vectara.com/docs/rest-api/sync-tool-server.md)
+
+### Lambda Tool Lifecycle
+- [Create and test lambda tools (guide)](https://docs.vectara.com/docs/agents/create-a-lambda-tool.md)
+- [Lambda tools (concept)](https://docs.vectara.com/docs/agents/lambda-tools.md)
+- [Custom tools (overview)](https://docs.vectara.com/docs/agents/custom-tools.md)
+- [Create tool](https://docs.vectara.com/docs/rest-api/create-tool.md)
+- [Test lambda without creation](https://docs.vectara.com/docs/rest-api/test-lambda-tool-without-creation.md)
+- [Test lambda](https://docs.vectara.com/docs/rest-api/test-tool.md)
+- [Update tool](https://docs.vectara.com/docs/rest-api/update-tool.md)
+- [Delete tool](https://docs.vectara.com/docs/rest-api/delete-tool.md)
 
 ### Search and Retrieval
 - [Search Quick Start](https://docs.vectara.com/docs/search-and-retrieval/search-quick-start.md)
