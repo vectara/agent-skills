@@ -9,6 +9,13 @@ compatibility: [claude-code, cursor, copilot, cline, windsurf]
 
 You are helping a developer build with the Vectara platform. Vectara is an enterprise agentic platform for building trusted AI agents with retrieval augmented generation (RAG).
 
+## See also
+
+This skill covers basic agent creation, corpora search, and the 3-step chat flow. For anything beyond that, the sibling skills are more specific:
+
+- **`vectara-agent-auth-and-secrets`** — OAuth, API keys, service-account credentials, `web_get` native auth modes, `$ref` to `agent.secrets` / `session.metadata` / `agent.metadata`, dynamic tool management via `PATCH /v2/agents/{key}`. Use whenever a tool calls an external API that needs credentials.
+- **`vectara-agent-orchestration`** — multi-step state machines (`first_step` + `steps[]` + `next_steps`), structured-output gating, sub-agents, runtime-constrained generation, Slack/connector-driven workflows, two-agent gates for human-in-the-loop approvals. Use for anything more complex than a single conversational loop.
+
 ## API Reference
 
 The full OpenAPI spec is available at `https://api.vectara.io/v2/openapi.json`. Fetch it when you need exact request/response schemas.
@@ -69,7 +76,7 @@ You can fetch any Vectara documentation page as markdown by appending `.md` to i
 |-----------|-------------|---------|
 | Corpus Search | `corpora_search` | Search indexed Vectara corpora |
 | Web Search | `web_search` | Search the internet |
-| Sub-agent | `subagent` | Delegate to another agent |
+| Sub-agent | `sub_agent` | Delegate to another agent |
 | Lambda | `lambda` | Run custom Python functions |
 | Document Conversion | built-in | Convert PDF/DOCX/PPTX to markdown |
 | MCP | `mcp` | External tool servers via Model Context Protocol |
