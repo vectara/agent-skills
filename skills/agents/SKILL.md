@@ -90,21 +90,21 @@ The table above lists the *kinds* of tools you can configure. To enumerate the a
 
 | Endpoint | Purpose |
 |----------|---------|
-| `GET /v2/tools` | List all tools (MCP + Lambda) available to the authenticated user |
+| `GET /v2/tools` | List all tools available to the authenticated user — built-ins, `dynamic_vectara`, MCP, and Lambda |
 | `GET /v2/tools/{tool_id}` | Full definition of one tool, including its JSON Schema `input_schema` |
 | `GET /v2/tool_servers` | List registered MCP tool servers |
 | `GET /v2/tool_servers/{tool_server_id}` | Server details |
 | `POST /v2/tool_servers/{tool_server_id}/sync` | Re-discover tools exposed by a server |
 
-`GET /v2/tools` query params: `filter` (regex on name+description), `type` (`mcp` or `lambda`), `enabled` (bool), `category` (array — `experimental` is excluded by default, pass it explicitly to include), `tool_server_id`, plus pagination.
+`GET /v2/tools` query params: `filter` (regex on name+description), `type`, `enabled` (bool), `category` (array — `experimental` is excluded by default, pass it explicitly to include), `tool_server_id`, plus pagination.
 
 Each tool returns: `id` (`tol_...` — use as `tool_id` in `tool_configurations`), `name`, `description`, `input_schema`, `type`, `enabled`, `category`.
 
 ```bash
-# Browse all MCP tools, projecting just the essentials
+# Browse every tool registered to the account
 curl -s -H "x-api-key: $API_KEY" \
-  "https://api.vectara.io/v2/tools?type=mcp" \
-  | jq '.tools[] | {id, name, description}'
+  "https://api.vectara.io/v2/tools" \
+  | jq '.tools[] | {id, name, type, description}'
 
 # Inspect a tool's input schema before wiring it into an agent
 curl -s -H "x-api-key: $API_KEY" \
@@ -119,10 +119,6 @@ curl -s -H "x-api-key: $API_KEY" \
   "https://api.vectara.io/v2/tools?tool_server_id=$SERVER_ID" \
   | jq '.tools[] | .name'
 ```
-
-**What's *not* in `GET /v2/tools`:**
-- Built-in types attached by `type` rather than `tool_id` — `corpora_search`, `web_search`, `web_get`, `sub_agent`, document conversion, structured indexing. These are always available; you wire them by `type` in `tool_configurations`.
-- The `dynamic_vectara` catalog of `tol_vectara_*` IDs (Slack post, core_document_index, etc.) is documented in Vectara's platform release notes, not currently enumerated by an API.
 
 ## Corpus Search Tool Configuration
 
