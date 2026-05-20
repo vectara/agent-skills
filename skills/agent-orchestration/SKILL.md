@@ -25,9 +25,9 @@ If you find yourself reaching for any of these, **stop and re-read this skill fr
 
 | Anti-pattern Gemini and others reach for | Reality |
 |---|---|
-| A `system_prompt` field on the agent body, e.g. `PATCH /v2/agents/{key} { "system_prompt": "..." }` | **No such field.** Instructions live inside `first_step.instructions[].template` (and per-step `instructions[]` for additional steps). |
+| A `system_prompt` field on the agent body, e.g. `PATCH /v2/agents/{key} { "system_prompt": "..." }` | **No such field.** Instructions live inside `steps.<step_name>.instructions[].template` for each step (the agent's entry step is identified by `first_step_name`). |
 | Updating `session.metadata` mid-session with a per-turn endpoint | **Not supported.** `session.metadata` is sealed at session-create. There is no "update metadata between turns" endpoint. |
-| A `CURRENT_STEP` variable in `session.metadata` that the LLM "self-gates" on by reading text instructions like "only call tool X if CURRENT_STEP == 'phase_2'" | **Not a real pattern.** It's prompt-based gating, not structural. The LLM has every tool attached and can call any of them. The correct mechanism is the platform's actual state machine: `first_step` + `steps[]` + `next_steps` + per-step `allowed_tools`. |
+| A `CURRENT_STEP` variable in `session.metadata` that the LLM "self-gates" on by reading text instructions like "only call tool X if CURRENT_STEP == 'phase_2'" | **Not a real pattern.** It's prompt-based gating, not structural. The LLM has every tool attached and can call any of them. The correct mechanism is the platform's actual state machine: `first_step_name` + `steps{}` map + `next_steps` + per-step `allowed_tools`. |
 | A single-step agent with a long verbose prompt enumerating "STATE 1, STATE 2, STATE 3" | Either you have a state machine — in which case use `steps[]` so the platform enforces it — or you have one phase, in which case stop pretending it's a state machine. |
 | Hand-rolled "the wrapper application advances the state" logic | Vectara's agent loop *is* the conductor when `steps[]` is configured. The `next_steps` array on each step is evaluated automatically against `output_parser.store_as` slots and chooses the next step. The wrapper doesn't need to manage state. |
 
@@ -50,39 +50,41 @@ Concrete answer to "how do I gate Gather → Access selection → App-specific r
     "create_service_ticket": { "type": "mcp", "tool_id": "tol_itsm_create_ticket" }
   },
 
-  "first_step": {
-    "name": "gather",
-    "type": "conversational",
-    "allowed_tools": ["get_applications"],
-    "instructions": [{
-      "type": "inline",
-      "name": "gather-instructions",
-      "template": "Phase 1: GATHER. Ask the user for App Name, Justification, and Target Emails. Call get_applications to validate the app. If it returns no match, surface the deflection to the user and stop. Do not ask about access types — that's a later step."
-    }],
-    "output_parser": {
-      "type": "json",
-      "json_schema": {
-        "type": "object",
-        "properties": {
-          "app_validated": { "type": "boolean" },
-          "app_key":       { "type": "string" },
-          "deflected":     { "type": "boolean" }
+  "first_step_name": "gather",
+  "steps": {
+    "gather": {
+      "allowed_tools": ["get_applications"],
+      "instructions": [{
+        "type": "inline",
+        "name": "gather-instructions",
+        "template": "Phase 1: GATHER. Ask the user for App Name, Justification, and Target Emails. Call get_applications to validate the app. If it returns no match, surface the deflection to the user and stop. Do not ask about access types — that's a later step."
+      }],
+      "output_parser": {
+        "type": "structured",
+        "json_schema": {
+          "name": "gather_result",
+          "description": "App validation and deflection signal from Phase 1.",
+          "strict": true,
+          "schema": {
+            "type": "object",
+            "properties": {
+              "app_validated": { "type": "boolean" },
+              "app_key":       { "type": "string" },
+              "deflected":     { "type": "boolean" }
+            },
+            "required": ["app_validated", "app_key", "deflected"],
+            "additionalProperties": false
+          }
         },
-        "required": ["app_validated", "deflected"]
+        "store_as": "$.gather"
       },
-      "store_as": "$.gather"
+      "next_steps": [
+        { "condition": "get('$.gather.deflected') == true", "step_name": "end_deflected" },
+        { "condition": "get('$.gather.app_validated') == true", "step_name": "access_selection" },
+        { "step_name": "end_invalid" }
+      ]
     },
-    "next_steps": [
-      { "condition": "get('$.gather.deflected') == true", "step_name": "end_deflected" },
-      { "condition": "get('$.gather.app_validated') == true", "step_name": "access_selection" },
-      { "step_name": "end_invalid" }
-    ]
-  },
-
-  "steps": [
-    {
-      "name": "access_selection",
-      "type": "conversational",
+    "access_selection": {
       "allowed_tools": ["get_access_types"],
       "instructions": [{
         "type": "inline",
@@ -90,13 +92,19 @@ Concrete answer to "how do I gate Gather → Access selection → App-specific r
         "template": "Phase 2: ACCESS SELECTION. Call get_access_types for $.gather.app_key. Present options to the user, wait for their pick, and only their pick. The picked role MUST come from $.candidates (enum populated at runtime from the tool result)."
       }],
       "output_parser": {
-        "type": "json",
+        "type": "structured",
         "json_schema": {
-          "type": "object",
-          "properties": {
-            "role_binding": { "type": "string", "description": "Must be one of $.candidates." }
-          },
-          "required": ["role_binding"]
+          "name": "access_selection_result",
+          "description": "Selected role binding from the runtime-populated candidate list.",
+          "strict": true,
+          "schema": {
+            "type": "object",
+            "properties": {
+              "role_binding": { "type": "string", "description": "Must be one of $.candidates." }
+            },
+            "required": ["role_binding"],
+            "additionalProperties": false
+          }
         },
         "store_as": "$.access"
       },
@@ -106,25 +114,35 @@ Concrete answer to "how do I gate Gather → Access selection → App-specific r
         { "step_name": "submit" }
       ]
     },
-    {
-      "name": "oracle_routing",
-      "type": "conversational",
+    "oracle_routing": {
       "allowed_tools": ["get_oracle_flex"],
       "instructions": [{ "type": "inline", "name": "oracle-flex", "template": "Phase 3 (Oracle Fusion): Gather oracle flex fields via get_oracle_flex. Confirm with the user and emit the final routing JSON." }],
-      "output_parser": { "type": "json", "json_schema": { "type": "object", "properties": { "flex": { "type": "object" } } }, "store_as": "$.routing" },
+      "output_parser": {
+        "type": "structured",
+        "json_schema": {
+          "name": "oracle_routing_result",
+          "strict": true,
+          "schema": { "type": "object", "properties": { "flex": { "type": "object" } }, "required": ["flex"], "additionalProperties": false }
+        },
+        "store_as": "$.routing"
+      },
       "next_steps": [{ "step_name": "submit" }]
     },
-    {
-      "name": "pendo_routing",
-      "type": "conversational",
+    "pendo_routing": {
       "allowed_tools": ["get_pendo_flex"],
       "instructions": [{ "type": "inline", "name": "pendo-flex", "template": "Phase 3 (Pendo): Gather pendo subscription + role bundle via get_pendo_flex." }],
-      "output_parser": { "type": "json", "json_schema": { "type": "object", "properties": { "flex": { "type": "object" } } }, "store_as": "$.routing" },
+      "output_parser": {
+        "type": "structured",
+        "json_schema": {
+          "name": "pendo_routing_result",
+          "strict": true,
+          "schema": { "type": "object", "properties": { "flex": { "type": "object" } }, "required": ["flex"], "additionalProperties": false }
+        },
+        "store_as": "$.routing"
+      },
       "next_steps": [{ "step_name": "submit" }]
     },
-    {
-      "name": "submit",
-      "type": "conversational",
+    "submit": {
       "allowed_tools": ["create_service_ticket"],
       "instructions": [{
         "type": "inline",
@@ -133,9 +151,15 @@ Concrete answer to "how do I gate Gather → Access selection → App-specific r
       }],
       "output_parser": { "type": "default" }
     },
-    { "name": "end_deflected", "type": "conversational", "instructions": [{ "type": "inline", "name": "deflect", "template": "Politely surface the KB article and end the conversation." }], "output_parser": { "type": "default" } },
-    { "name": "end_invalid",   "type": "conversational", "instructions": [{ "type": "inline", "name": "invalid", "template": "Apologize that the request couldn't be validated; suggest the user contact the helpdesk." }], "output_parser": { "type": "default" } }
-  ]
+    "end_deflected": {
+      "instructions": [{ "type": "inline", "name": "deflect", "template": "Politely surface the KB article and end the conversation." }],
+      "output_parser": { "type": "default" }
+    },
+    "end_invalid": {
+      "instructions": [{ "type": "inline", "name": "invalid", "template": "Apologize that the request couldn't be validated; suggest the user contact the helpdesk." }],
+      "output_parser": { "type": "default" }
+    }
+  }
 }
 ```
 
@@ -150,28 +174,31 @@ Compare to the anti-pattern: a single-step agent with a verbose prompt + `CURREN
 
 ## Multi-step state machine
 
-A multi-step agent has `first_step` (the entry, a single object) and `steps[]` (an array of named steps). Transitions are declared on each step via `next_steps`:
+A multi-step agent has `first_step_name` (a string pointing at the entry) and `steps` (a *map* keyed by step name). Transitions are declared on each step via `next_steps`. The older top-level `first_step` field is deprecated.
 
 ```json
 {
-  "first_step": {
-    "name": "kb_check",
-    "type": "conversational",
-    "instructions": [...],
-    "output_parser": {
-      "type": "json",
-      "json_schema": { "type": "object", "properties": { "deflected": {"type":"boolean"} }, "required": ["deflected"] },
-      "store_as": "$.kb"
+  "first_step_name": "kb_check",
+  "steps": {
+    "kb_check": {
+      "instructions": [...],
+      "output_parser": {
+        "type": "structured",
+        "json_schema": {
+          "name": "kb_check",
+          "strict": true,
+          "schema": { "type": "object", "properties": { "deflected": {"type":"boolean"} }, "required": ["deflected"], "additionalProperties": false }
+        },
+        "store_as": "$.kb"
+      },
+      "next_steps": [
+        { "condition": "get('$.kb.deflected') == true", "step_name": "deflected_end" },
+        { "step_name": "classify_with_context" }
+      ]
     },
-    "next_steps": [
-      { "condition": "get('$.kb.deflected') == true", "step_name": "deflected_end" },
-      { "step_name": "classify_with_context" }
-    ]
-  },
-  "steps": [
-    { "name": "deflected_end", "type": "conversational", "instructions": [...], "output_parser": {"type":"default"} },
-    { "name": "classify_with_context", ... }
-  ]
+    "deflected_end": { "instructions": [...], "output_parser": {"type":"default"} },
+    "classify_with_context": { "instructions": [...], "...": "..." }
+  }
 }
 ```
 
@@ -198,15 +225,21 @@ JSONPath reads use `get('$.path')`, not bare `$.path`. The path must point at so
 
 ```json
 "output_parser": {
-  "type": "json",
+  "type": "structured",
   "json_schema": {
-    "type": "object",
-    "properties": {
-      "app":         { "type": "string", "enum": ["oracle_fusion", "pendo", "aem"] },
-      "sensitivity": { "type": "string", "enum": ["low", "medium", "high"] },
-      "confidence":  { "type": "number" }
-    },
-    "required": ["app", "sensitivity", "confidence"]
+    "name": "intent_classification",
+    "description": "Classifies the inbound request for downstream routing.",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "app":         { "type": "string", "enum": ["oracle_fusion", "pendo", "aem"] },
+        "sensitivity": { "type": "string", "enum": ["low", "medium", "high"] },
+        "confidence":  { "type": "number" }
+      },
+      "required": ["app", "sensitivity", "confidence"],
+      "additionalProperties": false
+    }
   },
   "store_as": "$.classification"
 }
@@ -214,20 +247,36 @@ JSONPath reads use `get('$.path')`, not bare `$.path`. The path must point at so
 
 After this step runs, downstream steps can branch on `get('$.classification.app')`, reference `$.classification.sensitivity` in instructions, etc. Use `output_parser: {"type": "default"}` for free-form text steps that don't need to capture structured output.
 
+### Strict-mode rules
+
+When `strict: true`, the platform enforces the OpenAI-structured-outputs subset of JSON Schema. Schemas that violate these will be rejected at agent creation or silently fall back to non-strict mode:
+
+- **`additionalProperties: false`** on every `object` type
+- **Every property listed in `required`** (no optional fields — make a field nullable via `"type": ["string", "null"]` instead)
+- **No** `minLength`, `maxLength`, `pattern`, `min`, `max`, or `items` keywords
+
+If you need optional fields or string-length validation, drop `strict: true` and validate downstream — but the model also has more freedom to produce shapes you didn't expect.
+
 ## Runtime-populated enum (constrained generation from a tool result)
 
 A common need: the LLM must pick from a list that's only known at runtime — role names from a permissions API, ticket categories from an ITSM, etc. Vectara's pattern is to write `enum` into the JSON schema but populate it dynamically from the prior tool call's stored result:
 
 ```json
 "output_parser": {
-  "type": "json",
+  "type": "structured",
   "json_schema": {
-    "type": "object",
-    "properties": {
-      "role_binding": {
-        "type": "string",
-        "description": "Must be one of $.candidates. Enum is populated at runtime from the wolken_get_access_types result."
-      }
+    "name": "role_pick",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "role_binding": {
+          "type": "string",
+          "description": "Must be one of $.candidates. Enum is populated at runtime from the wolken_get_access_types result."
+        }
+      },
+      "required": ["role_binding"],
+      "additionalProperties": false
     }
   }
 }
@@ -240,14 +289,14 @@ The step's tool fetches the candidates (`wolken_get_access_types`), the instruct
 All tools are declared once at the top-level `tool_configurations`. Each step can whitelist a subset via `allowed_tools`. Without `allowed_tools`, the step has access to every tool:
 
 ```json
-{
-  "name": "manager_gate",
-  "type": "conversational",
-  "allowed_tools": ["post_approval_request"],
-  "instructions": [...],
-  "reminders": [
-    { "type": "inline", "template": "You are at the GATE. Provisioning tools are not attached here." }
-  ]
+"steps": {
+  "manager_gate": {
+    "allowed_tools": ["post_approval_request"],
+    "instructions": [...],
+    "reminders": [
+      { "type": "inline", "template": "You are at the GATE. Provisioning tools are not attached here." }
+    ]
+  }
 }
 ```
 
@@ -393,24 +442,55 @@ The pattern for irreversible writes:
 
 This is *deployment-pattern* enforcement, not prompt enforcement. Don't trust "the model won't call the write tool" — split the tool into a separate agent so it's literally unreachable from the intake side.
 
-## Reusable instruction blocks via `skills`
+## Lazy-loaded instructions via `skills`
 
-Define named instruction snippets once and reference them across steps:
+Define `{description, content}` pairs the agent can load on demand instead of stuffing every runbook into the system prompt.
 
 ```json
 "skills": {
-  "citation_requirements": {
-    "description": "Citation rules for classification, approver messages, and audit-log entries.",
-    "content": "Every policy claim cites [policy:<doc_id>#<section>]. Every precedent claim cites [precedent:<request_id>]..."
-  },
-  "kb_deflection_guard": {
-    "description": "How to use the KB search result. Invoke at the start of every conversation.",
-    "content": "..."
+  "customer_escalation": {
+    "description": "Use when an inbound customer message reports an outage, a regression, data loss, or visible anger about an urgent issue. Loads the severity rubric, routing rules, and outbound message templates.",
+    "content": "## 1. Severity classification\nPick exactly ONE level using this rubric:\n- SEV-1 — production down OR data loss OR security/PII exposure...\n## 2. Required information to collect\n..."
   }
 }
 ```
 
-Step instructions invoke them by name: *"Apply the kb_deflection_guard skill."* Skills are not auto-applied — the model must be told to invoke them. Cleaner than inlining the same policy text into multiple step templates.
+- **`description` ≤ 500 chars.** Shown in the system prompt every turn — the model reads it to decide whether to invoke. Keep it diagnostic ("use when …").
+- **`content` ≤ 50,000 chars.** The heavy runbook. Loaded into context only when the skill fires. This is the whole point — large specialist guidance you don't pay tokens for on every turn.
+
+### How invocation works
+
+When an agent has skills configured, Vectara automatically exposes an `invoke_skill` tool to the model. There are two ways content gets loaded:
+
+1. **Model-driven.** The LLM emits a `tool_input` for `invoke_skill` with the skill's `skill_name`. Vectara injects the skill's `content` as a user message and emits a `skill_load` event.
+2. **Client-driven.** Your wrapper POSTs an event with `messages: [{"type": "skill", "skill_name": "customer_escalation"}]`. No model round-trip needed for the decision — Vectara loads the content immediately. Useful when your UI already knows which mode to enter (e.g. a routing rule that always loads the outage runbook for SEV-1 alerts).
+
+Either way the loaded content stays in session history for follow-up turns (until compaction).
+
+### Per-step restriction via `allowed_skills`
+
+Each step independently controls which skills the `invoke_skill` tool exposes:
+
+| Form | Semantics |
+|---|---|
+| omitted (default) | All skills declared on the agent are available |
+| `[]` (empty array) | No skills; the `invoke_skill` tool isn't exposed at all in this step |
+| `["skill_a", "skill_b"]` | Only those skills are loadable |
+
+Pairs cleanly with the multi-step pattern: a *router* step might set `allowed_skills: []` (force routing-only behavior), then transition into a *specialist* step that exposes exactly one skill.
+
+```json
+{
+  "name": "router",
+  "instructions": [{"type": "inline", "template": "Route the message; do not draft a reply."}],
+  "output_parser": {"type": "default"},
+  "allowed_skills": []
+}
+```
+
+### Skill vs. tool vs. prompt-stuffing
+
+A skill is *instructions* loaded on demand. If the agent needs to *do* something (fetch data, call an API, query a corpus), use a tool. If the guidance applies to every turn and is short, just put it in the system prompt. Skills shine when you have multiple distinct mindsets/runbooks/voices that would balloon the system prompt if always-loaded.
 
 ## `corpora_search` configuration
 

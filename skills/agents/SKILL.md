@@ -14,7 +14,7 @@ You are helping a developer build with the Vectara platform. Vectara is an enter
 This skill covers basic agent creation, corpora search, and the 3-step chat flow. For anything beyond that, the sibling skills are more specific:
 
 - **`vectara-agent-auth-and-secrets`** — OAuth, API keys, service-account credentials, `web_get` native auth modes, `$ref` to `agent.secrets` / `session.metadata` / `agent.metadata`, dynamic tool management via `PATCH /v2/agents/{key}`. Use whenever a tool calls an external API that needs credentials.
-- **`vectara-agent-orchestration`** — multi-step state machines (`first_step` + `steps[]` + `next_steps`), structured-output gating, sub-agents, runtime-constrained generation, Slack/connector-driven workflows, two-agent gates for human-in-the-loop approvals. Use for anything more complex than a single conversational loop.
+- **`vectara-agent-orchestration`** — multi-step state machines (`first_step_name` + `steps{}` map + `next_steps`), structured-output gating, sub-agents, runtime-constrained generation, Slack/connector-driven workflows, two-agent gates for human-in-the-loop approvals. Use for anything more complex than a single conversational loop.
 
 ## API Reference
 
@@ -29,10 +29,13 @@ You can fetch any Vectara documentation page as markdown by appending `.md` to i
 1. **API base URL** is `https://api.vectara.io/v2/`.
 2. **Authentication**: Use either `x-api-key` header with an API key, or `Authorization: Bearer <token>` with an OAuth token. Both are valid — use whichever the developer has. Never use both simultaneously.
 3. **Agents are a first-class resource.** Create them via `POST /v2/agents`, not by stitching together query calls manually.
-4. **Every agent needs three things:**
+4. **Every agent needs four things:**
    - `tool_configurations` — at least one tool (corpora_search, web_search, or custom)
-   - `first_step` — with `type: "conversational"`, `instructions`, and `output_parser`
+   - `steps` — a *map* of named step configs, each with `instructions` and `output_parser`
+   - `first_step_name` — the entry-point key into `steps` (typically `"main"`)
    - `model` — the LLM for reasoning (e.g., `gpt-4o`, `gemini-2-5-flash-vertex`)
+
+   The older top-level `first_step` field is deprecated — use `first_step_name` + `steps{}` even for single-step agents.
 5. **Sessions track conversations.** Create a session before sending messages: `POST /v2/agents/{key}/sessions`
 6. **Messages are events.** Send user input via `POST /v2/agents/{key}/sessions/{session_key}/events` with `type: "input_message"`
 7. **Never hardcode corpus IDs.** Use `corpus_key` (string) not `corpus_id` (number).
@@ -43,6 +46,10 @@ You can fetch any Vectara documentation page as markdown by appending `.md` to i
 {
   "name": "my-agent",
   "description": "Agent description",
+  "model": {
+    "name": "gpt-4o",
+    "parameters": {"temperature": 0.3, "max_tokens": 1000}
+  },
   "tool_configurations": {
     "search": {
       "type": "corpora_search",
@@ -54,21 +61,21 @@ You can fetch any Vectara documentation page as markdown by appending `.md` to i
       }
     }
   },
-  "first_step": {
-    "type": "conversational",
-    "instructions": [{
-      "type": "inline",
-      "name": "My Instructions",
-      "template": "You are a helpful assistant. Use the search tool to find relevant information. Cite your sources."
-    }],
-    "output_parser": {"type": "default"}
-  },
-  "model": {
-    "name": "gpt-4o",
-    "parameters": {"temperature": 0.3, "max_tokens": 1000}
+  "first_step_name": "main",
+  "steps": {
+    "main": {
+      "instructions": [{
+        "type": "inline",
+        "name": "My Instructions",
+        "template": "You are a helpful assistant. Use the search tool to find relevant information. Cite your sources."
+      }],
+      "output_parser": {"type": "default"}
+    }
   }
 }
 ```
+
+For multi-step workflows, add more entries to `steps` and use `next_steps` on each step to declare transitions — see `vectara-agent-orchestration`.
 
 ## Available Tool Types
 
@@ -305,7 +312,9 @@ By default, the corpora_search tool has `generation.enabled: false`. To get RAG 
 ## Common Mistakes to Avoid
 
 - Using `corpus_id` (number) instead of `corpus_key` (string)
-- Forgetting `output_parser: {"type": "default"}` in `first_step`
+- Using the deprecated top-level `first_step` field instead of `first_step_name` + `steps{}` map
+- Forgetting `output_parser: {"type": "default"}` on the entry step
+- Pinning a single header in `argument_override.headers` and expecting other headers the LLM sets to be merged in — the dict is **replace, not merge**. Pin every header you care about together, or leave the field unset
 - Sending messages without creating a session first
 - Putting `limit` inside `corpora[]` instead of in `search{}`
 - Looking for `tool_output.results` instead of `tool_output.search_results` for corpus search
