@@ -30,7 +30,7 @@ If you find yourself reaching for any of these, **stop and re-read this skill fr
 | A `CURRENT_STEP` variable in `session.metadata` that the LLM "self-gates" on by reading text instructions like "only call tool X if CURRENT_STEP == 'phase_2'" | **Not a real pattern.** It's prompt-based gating, not structural. The LLM has every tool attached and can call any of them. The correct mechanism is the platform's actual state machine: `first_step_name` + `steps{}` map + `next_steps` + per-step `allowed_tools`. |
 | A single-step agent with a long verbose prompt enumerating "STATE 1, STATE 2, STATE 3" | Either you have a state machine — in which case use `steps[]` so the platform enforces it — or you have one phase, in which case stop pretending it's a state machine. |
 | Hand-rolled "the wrapper application advances the state" logic | Vectara's agent loop *is* the conductor when `steps{}` is configured. Each step's `next_steps` is evaluated automatically against that step's own `$.output` (its parsed structured output, or `$.output.text` for default-text steps), and the platform picks the next step. The wrapper doesn't need to manage state. |
-| A `store_as` field on `output_parser` that names a slot like `"$.gather"` for later steps to read | **No such field.** The API rejects it with `Unknown property`. A step's `next_steps` can only read the step's own `$.output` — there is no shared key-value store across steps. If a downstream step needs to route on an upstream value, the downstream step's structured output must re-emit that value (see Quick Recipe). |
+| Cross-step named slots — pretending a step's output is addressable from later steps by a custom name | **There is no shared key-value store across steps.** A step's `next_steps` can only read the step's own `$.output`. If a downstream step needs to route on an upstream value, the downstream step's structured output must re-emit that value (see Quick Recipe). |
 
 When a developer asks for "deterministic step-by-step execution where the LLM cannot skip ahead, hallucinate values, or run tools out of order," the answer is **multi-step state machines + `allowed_tools`**, documented below. That gives genuine structural enforcement — each step exposes only its declared tools, so the LLM literally cannot call out-of-phase tools regardless of how the conversation goes.
 
@@ -247,11 +247,12 @@ JSONPath reads use `get('$.path')`, not bare `$.path`. Available roots:
 | Path | What |
 |---|---|
 | `$.output.<field>` | The **current step's own** structured output. (`$.output.text` for `output_parser: {"type": "default"}`.) Only available on the step that just ran — there's no cross-step slot store. |
-| `$.session.metadata.<key>` | Whatever the wrapper put in `session.metadata` at session create. |
-| `$.agent.metadata.<key>` | Whatever was put in `agent.metadata` at agent create. |
 | `$.tools.<tool_config_name>.outputs.latest.<field>` | The most recent invocation of that tool, this session. |
+| `$.session.metadata.<key>`, `$.session.name`, `$.session.key`, `$.session.description` | Session-scoped values. |
+| `$.agent.metadata.<key>`, `$.agent.name`, `$.agent.key`, `$.agent.description` | Agent-scoped values. |
+| `$.currentDate` | ISO 8601 timestamp at condition-evaluation time. Useful for time-of-day or stale-data branching ("if past business hours, escalate"). |
 
-**No `$.<some_named_slot>`** — there is no `store_as` field on `output_parser`, and earlier steps do not write to a key-value store the rest of the session can address. If a downstream step needs to route on a value from an upstream step, the downstream step's structured output must re-emit it (the LLM has the conversation history and can do so). See the Quick Recipe above for the pattern.
+**No custom slot paths.** Earlier steps do not write to a shared key-value store. If a downstream step needs to route on a value from an upstream step, the downstream step's structured output must re-emit it (the LLM has the conversation history and can do so). See the Quick Recipe above for the pattern.
 
 ## `output_parser` shapes
 
@@ -282,8 +283,6 @@ JSONPath reads use `get('$.path')`, not bare `$.path`. Available roots:
 ```
 
 After this step runs, **this step's** `next_steps` can branch on `get('$.output.app')`, `get('$.output.sensitivity')`, etc. The output is **only addressable from the step that produced it** — there's no shared key-value store. If a later step needs to route on `app`, that later step's structured output must re-emit it (see the Quick Recipe above for the re-emit pattern).
-
-There is **no `store_as` field** — a common AI-generated hallucination. The API rejects it with `Unknown property`.
 
 ### Strict-mode rules
 
@@ -463,7 +462,6 @@ A step can be designed to *wait* for an external signal — e.g. `manager_gate` 
 ```bash
 POST /v2/agents/{intake_agent_key}/sessions/{intake_session_key}/events
 {
-  "type": "input_message",
   "messages": [{
     "type": "text",
     "content": "approval_status_update: approved by bob.kerns@csg.com, wolken_ticket_id=WLK-48211"
@@ -615,8 +613,7 @@ Strict-mode schema validators may reject them — keep them out of any payload t
 ## Common mistakes to avoid
 
 - Putting transitions on the wrong step. `next_steps` lives on the step it's *leaving from*, not the target.
-- Adding a `store_as` field to `output_parser`. It doesn't exist — the API rejects with `Unknown property`. Read the step's own output via `$.output.<field>`; re-emit fields downstream steps need to route on.
-- Reading another step's output by name from `next_steps` (e.g. `get('$.gather.app_key')` from a different step). Only `$.output` (current step), `$.session.metadata`, `$.agent.metadata`, and `$.tools.<name>.outputs.latest` are addressable.
+- Trying to read another step's output by a custom name from `next_steps`. Only `$.output` (the current step's own output), `$.session.metadata`, `$.agent.metadata`, `$.tools.<name>.outputs.latest`, and `$.currentDate` are addressable.
 - Hard-coding an enum the model can't trust — use the runtime-populated-enum pattern.
 - Trusting prompt-based "don't call this tool" instead of removing the tool from `allowed_tools`.
 - Registering a connector inside the agent JSON (the connectors API is separate — `POST /v2/agents/{key}/connectors`).

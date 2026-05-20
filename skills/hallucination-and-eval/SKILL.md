@@ -56,7 +56,7 @@ Response excerpt:
 ```json
 {
   "summary": "According to 'The Hitchhiker's Guide to the Galaxy' by Douglas Adams, the answer is 42.",
-  "summary_language": "en",
+  "response_language": "eng",
   "factual_consistency_score": 0.98,
   "search_results": [ /* ... */ ]
 }

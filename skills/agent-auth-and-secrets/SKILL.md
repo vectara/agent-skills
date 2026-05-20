@@ -225,8 +225,14 @@ Stored encrypted at rest with the agent's `agent_ekey_id`. Values redacted in ev
 - Sending OAuth client credentials in the request body of a `web_get` token endpoint. Vectara's `OAuth2Client` sends them via `Authorization: Basic` per RFC 6749 §2.3.1.
 - Treating `session.metadata` as encrypted. It isn't — values appear in `tool_input` events. Use `agent.secrets` for actual secrets when possible.
 - Adding a tool via PATCH and expecting an existing session to see it. Sessions resolve refs at create time. Re-create the session.
-- Pinning a single header in `argument_override.headers` and expecting other headers the LLM sets to be merged in. **The `headers` dict is replace, not merge** — if you pin `Authorization` alone, any `Accept`, `Content-Type`, or custom header the LLM would have added is dropped. Pin every header you care about together in one dict, or leave `headers` unset entirely if you want the LLM to set per-call headers (e.g. a notification `Title`/`Priority`).
-- Expecting `argument_override.url` to support template substitution. It's a single static string (or `EagerReference`) — no `{var}` interpolation. For variable URLs, pin everything *except* `url` and use `description_template` to tell the LLM the URL pattern to construct.
+- Pinning a header with the **nested form** — `argument_override: {"headers": {"Authorization": "..."}}` — and expecting the agent to still set other headers like `Accept` or `Content-Type`. **The whole `headers` property is hidden from the agent's tool schema** in that case (top-level override keys are stripped from the schema), so the agent literally cannot emit `headers` at all and only your one pinned header survives. To pin one header while leaving siblings open to the agent, use a **dot-notation key** at the override top level:
+  ```json
+  "argument_override": {
+    "headers.Authorization": { "$ref": "agent.secrets.api_key" }
+  }
+  ```
+  Only `headers.Authorization` is hidden from the schema; the agent can still set `headers.Accept`, `headers.Content-Type`, etc. The same trick works for any nested path (`body.api_key`, `auth.refresh_token`, etc.).
+- Expecting `argument_override.url` to support template substitution. The URL string is passed verbatim to the HTTP client — `{var}` syntax produces a request with a literal `{var}` in the path, which usually 404s at the upstream. For variable URLs, pin everything *except* `url` and use `description_template` to tell the agent the URL pattern to construct.
 - Putting structured user-supplied fields like `requestor_email` into `web_get.body`. The body is a string the LLM constructs; for structured-arg tools use `mcp` or `dynamic_vectara` tool types.
 
 ## Working example

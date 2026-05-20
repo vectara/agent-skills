@@ -11,7 +11,7 @@ You are helping a developer query Vectara corpora directly. This skill covers th
 
 ## When to use this skill
 
-- The task is a direct `POST /v2/query`, `POST /v2/corpora/{key}/query`, or `GET /v2/corpora/{key}/search` call — quick lookups, RAG embedded in an existing app, background jobs, internal tools.
+- The task is a direct `POST /v2/query`, `POST /v2/corpora/{key}/query`, or `GET /v2/corpora/{key}/query` call — quick lookups, RAG embedded in an existing app, background jobs, internal tools.
 - The developer is configuring an agent's `corpora_search` tool — the `query_configuration.search` and `query_configuration.generation` blocks use the **exact same shape** as `/v2/query`. Tune them here.
 - Result quality is poor: missing the right document, near-duplicate results, stale results dominating.
 - The developer needs filters (`doc.X` / `part.X`), reranking (`customer_reranker`, `mmr`, `chain`, `userfn`, knee), hybrid search (`lexical_interpolation`), citations, or a custom prompt template.
@@ -35,16 +35,20 @@ You are helping a developer query Vectara corpora directly. This skill covers th
 
 ## The three query endpoints
 
+The single-corpus endpoint `/v2/corpora/{corpus_key}/query` is exposed as **both** `GET` (simple, query in URL) and `POST` (full tuning body). Same URL, different verbs. The multi-corpus endpoint `/v2/query` is `POST` only.
+
 | Endpoint | Method | Body shape | Use when |
 |---|---|---|---|
-| `/v2/corpora/{corpus_key}/search` | `GET` | none (query in URL) | One-shot lookups. Only `query`, `limit`, `offset`, `save_history`, `intelligent_query_rewriting`. No filters, no reranker, no hybrid, no generation. |
+| `/v2/corpora/{corpus_key}/query` | `GET` | none (query in URL) | One-shot lookups. Only `query`, `limit`, `offset`, `save_history`, `intelligent_query_rewriting`. No filters, no reranker, no hybrid, no generation. |
 | `/v2/corpora/{corpus_key}/query` | `POST` | `{query, search, generation?}` — `search` *without* `corpora[]` | Single-corpus, full tuning surface. |
 | `/v2/query` | `POST` | `{query, search: {corpora: [...]}, generation?}` | Multi-corpus. Each corpus carries its own filter/hybrid setting; results interleave by score. |
 
-### Simple GET search
+> **Note on the Python SDK:** the SDK exposes the GET form as `client.corpora.search(...)` (the Fern-generated method name), but the underlying HTTP URL is `/v2/corpora/{key}/query` — `/search` is **not** a valid path.
+
+### Simple GET query
 
 ```bash
-curl -G "https://api.vectara.io/v2/corpora/my-corpus/search" \
+curl -G "https://api.vectara.io/v2/corpora/my-corpus/query" \
   -H "x-api-key: $VECTARA_API_KEY" \
   --data-urlencode "query=What is the refund policy?" \
   --data-urlencode "limit=10"
@@ -168,11 +172,10 @@ Normalized 0.0–1.0 scores. `cutoff: 0.5` is the recommended default; below `0.
 
 | `reranker_name` | Multilingual | Honors `instructions` | Notes |
 |---|---|---|---|
-| `Rerank_Multilingual_v1` | Yes | No | Slingshot, the default multilingual neural reranker. |
-| `slingshot` | Yes | No | Shorthand alias for `Rerank_Multilingual_v1`. Interchangeable. |
+| `Rerank_Multilingual_v1` | Yes | No | The default multilingual neural reranker (internally known as Slingshot). |
 | `qwen3-reranker` | Yes | **Yes** | Instruction-following reranker — pass an `instructions` string to steer ranking by user role, content type, or domain priority. See "Reranker instructions" below. |
 
-`instructions` is silently ignored by `Rerank_Multilingual_v1` / `slingshot`. Reach for `qwen3-reranker` when you need that steering.
+`instructions` is silently ignored by `Rerank_Multilingual_v1`. Reach for `qwen3-reranker` when you need that steering.
 
 ### Reranker instructions (qwen3-reranker)
 
