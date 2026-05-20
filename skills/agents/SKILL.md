@@ -33,7 +33,7 @@ You can fetch any Vectara documentation page as markdown by appending `.md` to i
    - `tool_configurations` — at least one tool (corpora_search, web_search, or custom)
    - `steps` — a *map* of named step configs, each with `instructions` and `output_parser`
    - `first_step_name` — the entry-point key into `steps` (typically `"main"`)
-   - `model` — the LLM for reasoning (e.g., `gpt-4o`, `gemini-2-5-flash-vertex`)
+   - `model` — the LLM for reasoning (e.g., `gpt-5.4`, `gpt-4o`, `gemini-2-5-flash-vertex` — all built into the SaaS; BYO models registered via `POST /v2/llms` work too)
 
    The older top-level `first_step` field is deprecated — use `first_step_name` + `steps{}` even for single-step agents.
 5. **Sessions track conversations.** Create a session before sending messages: `POST /v2/agents/{key}/sessions`
@@ -47,7 +47,7 @@ You can fetch any Vectara documentation page as markdown by appending `.md` to i
   "name": "my-agent",
   "description": "Agent description",
   "model": {
-    "name": "gpt-4o",
+    "name": "gpt-5.4",
     "parameters": {"temperature": 0.3, "max_tokens": 1000}
   },
   "tool_configurations": {
@@ -313,7 +313,7 @@ AGENT_KEY=$(curl -s -X POST https://api.vectara.io/v2/agents \
   -H "x-api-key: $API_KEY" -H "Content-Type: application/json" \
   -d '{
     "name": "Document Analyst",
-    "model": {"name": "gpt-4o"},
+    "model": {"name": "gpt-5.4"},
     "first_step_name": "main",
     "steps": {"main": {
       "instructions": [{"type": "inline", "name": "doc",
