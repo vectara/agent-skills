@@ -594,7 +594,7 @@ The full reference implementation (with the same retry posture for bulk corpus-d
 - Using `corpus_id` (number) instead of `corpus_key` (string)
 - Using the deprecated top-level `first_step` field instead of `first_step_name` + `steps{}` map
 - Forgetting `output_parser: {"type": "default"}` on the entry step
-- Pinning a single header with the nested form `argument_override: {"headers": {"Authorization": "..."}}` and expecting the LLM to still set `Accept` / `Content-Type`. The whole `headers` property gets hidden from the LLM's tool schema and your one pinned header is the only one that goes out. To pin one header while leaving siblings open to the LLM, use a dot-notation key at the override top level: `argument_override: {"headers.Authorization": {"$ref": "agent.secrets.api_key"}}`. See `vectara-agent-auth-and-secrets` for the full pattern
+- Pinning a single header with the nested form `argument_override: {"headers": {"Authorization": "..."}}` and expecting the agent to still set `Accept` / `Content-Type`. The whole `headers` property gets hidden from the agent's tool schema and your one pinned header is the only one that goes out. To pin one header while leaving siblings open to the agent, use a dot-notation key at the override top level: `argument_override: {"headers.Authorization": {"$ref": "agent.secrets.api_key"}}`. See `vectara-agent-auth-and-secrets` for the full pattern
 - Sending messages without creating a session first
 - Putting `limit` inside `corpora[]` instead of in `search{}`
 - Looking for `event.tool_output.results` instead of `event.tool_output.search_results` for corpus search

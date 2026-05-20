@@ -465,8 +465,7 @@ POST /v2/agents/{intake_agent_key}/sessions/{intake_session_key}/events
   "messages": [{
     "type": "text",
     "content": "approval_status_update: approved by bob.kerns@csg.com, wolken_ticket_id=WLK-48211"
-  }],
-  "stream_response": false
+  }]
 }
 ```
 
