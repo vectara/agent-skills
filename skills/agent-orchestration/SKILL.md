@@ -29,13 +29,16 @@ If you find yourself reaching for any of these, **stop and re-read this skill fr
 | Updating `session.metadata` mid-session with a per-turn endpoint | **Not supported.** `session.metadata` is sealed at session-create. There is no "update metadata between turns" endpoint. |
 | A `CURRENT_STEP` variable in `session.metadata` that the LLM "self-gates" on by reading text instructions like "only call tool X if CURRENT_STEP == 'phase_2'" | **Not a real pattern.** It's prompt-based gating, not structural. The LLM has every tool attached and can call any of them. The correct mechanism is the platform's actual state machine: `first_step_name` + `steps{}` map + `next_steps` + per-step `allowed_tools`. |
 | A single-step agent with a long verbose prompt enumerating "STATE 1, STATE 2, STATE 3" | Either you have a state machine — in which case use `steps[]` so the platform enforces it — or you have one phase, in which case stop pretending it's a state machine. |
-| Hand-rolled "the wrapper application advances the state" logic | Vectara's agent loop *is* the conductor when `steps[]` is configured. The `next_steps` array on each step is evaluated automatically against `output_parser.store_as` slots and chooses the next step. The wrapper doesn't need to manage state. |
+| Hand-rolled "the wrapper application advances the state" logic | Vectara's agent loop *is* the conductor when `steps{}` is configured. Each step's `next_steps` is evaluated automatically against that step's own `$.output` (its parsed structured output, or `$.output.text` for default-text steps), and the platform picks the next step. The wrapper doesn't need to manage state. |
+| A `store_as` field on `output_parser` that names a slot like `"$.gather"` for later steps to read | **No such field.** The API rejects it with `Unknown property`. A step's `next_steps` can only read the step's own `$.output` — there is no shared key-value store across steps. If a downstream step needs to route on an upstream value, the downstream step's structured output must re-emit that value (see Quick Recipe). |
 
 When a developer asks for "deterministic step-by-step execution where the LLM cannot skip ahead, hallucinate values, or run tools out of order," the answer is **multi-step state machines + `allowed_tools`**, documented below. That gives genuine structural enforcement — each step exposes only its declared tools, so the LLM literally cannot call out-of-phase tools regardless of how the conversation goes.
 
 ## Quick recipe — strict step-gated provisioning workflow
 
 Concrete answer to "how do I gate Gather → Access selection → App-specific routing → Submit so the LLM can't skip ahead?". This is the **correct** translation of that scenario — every gate is enforced structurally via `allowed_tools` on a named step, and the platform's `next_steps` evaluation (not the LLM) decides transitions.
+
+**Key constraint to keep in mind:** each step's `next_steps` can only branch on the **current step's own output** at `$.output` (plus `$.session.metadata`, `$.agent.metadata`, and `$.tools.<name>.outputs.latest`). There's no shared key-value store across steps. If a downstream step needs to route on a value from an upstream step, the downstream step's structured output must **re-emit** that value (the LLM has the prior turns in its conversation context and can do so). The recipe below does this with `app_key`.
 
 ```json
 {
@@ -75,12 +78,11 @@ Concrete answer to "how do I gate Gather → Access selection → App-specific r
             "required": ["app_validated", "app_key", "deflected"],
             "additionalProperties": false
           }
-        },
-        "store_as": "$.gather"
+        }
       },
       "next_steps": [
-        { "condition": "get('$.gather.deflected') == true", "step_name": "end_deflected" },
-        { "condition": "get('$.gather.app_validated') == true", "step_name": "access_selection" },
+        { "condition": "get('$.output.deflected') == true", "step_name": "end_deflected" },
+        { "condition": "get('$.output.app_validated') == true", "step_name": "access_selection" },
         { "step_name": "end_invalid" }
       ]
     },
@@ -89,28 +91,28 @@ Concrete answer to "how do I gate Gather → Access selection → App-specific r
       "instructions": [{
         "type": "inline",
         "name": "access-instructions",
-        "template": "Phase 2: ACCESS SELECTION. Call get_access_types for $.gather.app_key. Present options to the user, wait for their pick, and only their pick. The picked role MUST come from $.candidates (enum populated at runtime from the tool result)."
+        "template": "Phase 2: ACCESS SELECTION. The validated app_key is in the prior turn's structured output — re-emit it on this turn's output too (the platform needs it to route). Call get_access_types for that app_key. Present options to the user, wait for their pick, and only their pick. The picked role MUST be one of the values get_access_types returned."
       }],
       "output_parser": {
         "type": "structured",
         "json_schema": {
           "name": "access_selection_result",
-          "description": "Selected role binding from the runtime-populated candidate list.",
+          "description": "Selected role binding plus a re-emit of app_key so the platform can route to the right per-app step next.",
           "strict": true,
           "schema": {
             "type": "object",
             "properties": {
-              "role_binding": { "type": "string", "description": "Must be one of $.candidates." }
+              "app_key":      { "type": "string", "description": "Copy of app_key from Phase 1 — re-emitted so next_steps below can branch on it." },
+              "role_binding": { "type": "string", "description": "Must be one of the values get_access_types returned this turn." }
             },
-            "required": ["role_binding"],
+            "required": ["app_key", "role_binding"],
             "additionalProperties": false
           }
-        },
-        "store_as": "$.access"
+        }
       },
       "next_steps": [
-        { "condition": "get('$.gather.app_key') == 'oracle_fusion'", "step_name": "oracle_routing" },
-        { "condition": "get('$.gather.app_key') == 'pendo'",         "step_name": "pendo_routing" },
+        { "condition": "get('$.output.app_key') == 'oracle_fusion'", "step_name": "oracle_routing" },
+        { "condition": "get('$.output.app_key') == 'pendo'",         "step_name": "pendo_routing" },
         { "step_name": "submit" }
       ]
     },
@@ -123,8 +125,7 @@ Concrete answer to "how do I gate Gather → Access selection → App-specific r
           "name": "oracle_routing_result",
           "strict": true,
           "schema": { "type": "object", "properties": { "flex": { "type": "object" } }, "required": ["flex"], "additionalProperties": false }
-        },
-        "store_as": "$.routing"
+        }
       },
       "next_steps": [{ "step_name": "submit" }]
     },
@@ -137,8 +138,7 @@ Concrete answer to "how do I gate Gather → Access selection → App-specific r
           "name": "pendo_routing_result",
           "strict": true,
           "schema": { "type": "object", "properties": { "flex": { "type": "object" } }, "required": ["flex"], "additionalProperties": false }
-        },
-        "store_as": "$.routing"
+        }
       },
       "next_steps": [{ "step_name": "submit" }]
     },
@@ -147,7 +147,7 @@ Concrete answer to "how do I gate Gather → Access selection → App-specific r
       "instructions": [{
         "type": "inline",
         "name": "submit-instructions",
-        "template": "Phase 4: SUBMIT. Build the payload from $.gather, $.access, $.routing. Invoke create_service_ticket once per target user. Return the ticket IDs."
+        "template": "Phase 4: SUBMIT. Build the payload from what the prior steps produced (visible in this session's conversation history): the validated app_key and target users from Phase 1, the role_binding from Phase 2, the flex routing fields from Phase 3. Invoke create_service_ticket once per target user. Return the ticket IDs."
       }],
       "output_parser": { "type": "default" }
     },
@@ -166,7 +166,7 @@ Concrete answer to "how do I gate Gather → Access selection → App-specific r
 What this gives the developer that the anti-pattern cannot:
 
 - **Structural tool enforcement.** In the `gather` step, only `get_applications` is attached. If the LLM tries to call `create_service_ticket`, it fails because that tool literally isn't in the step's tool list — not because a prompt told it not to.
-- **Platform-evaluated transitions.** `next_steps` are evaluated against `output_parser.store_as` slots by the agent loop, not the LLM. The LLM produces structured output; the platform decides what runs next.
+- **Platform-evaluated transitions.** `next_steps` are evaluated by the agent loop against the step's own `$.output` (the parsed structured output), not the LLM. The LLM produces structured output; the platform decides what runs next.
 - **No wrapper-app state management.** The wrapper creates the session once with the user's identity in `session.metadata`. After that, every transition is internal.
 - **Auditable trace.** Each step transition emits an event (`step_transition`) with the from/to step names and the parsed structured output that drove it. Compliance-friendly.
 
@@ -188,11 +188,10 @@ A multi-step agent has `first_step_name` (a string pointing at the entry) and `s
           "name": "kb_check",
           "strict": true,
           "schema": { "type": "object", "properties": { "deflected": {"type":"boolean"} }, "required": ["deflected"], "additionalProperties": false }
-        },
-        "store_as": "$.kb"
+        }
       },
       "next_steps": [
-        { "condition": "get('$.kb.deflected') == true", "step_name": "deflected_end" },
+        { "condition": "get('$.output.deflected') == true", "step_name": "deflected_end" },
         { "step_name": "classify_with_context" }
       ]
     },
@@ -236,18 +235,30 @@ Pair with `allowed_tools: []` on the Q&A step to make sure the model can't accid
 
 ```json
 "next_steps": [
-  { "condition": "get('$.classification.has_sufficient_info') == false", "step_name": "gather_info" },
-  { "condition": "get('$.classification.recommended_decision') == 'deny_with_reason'", "step_name": "notify_denial" },
-  { "condition": "get('$.classification.app') == 'oracle_fusion'", "step_name": "pick_oracle_role" },
+  { "condition": "get('$.output.has_sufficient_info') == false", "step_name": "gather_info" },
+  { "condition": "get('$.output.recommended_decision') == 'deny_with_reason'", "step_name": "notify_denial" },
+  { "condition": "get('$.output.app') == 'oracle_fusion'", "step_name": "pick_oracle_role" },
   { "step_name": "manager_gate" }
 ]
 ```
 
-JSONPath reads use `get('$.path')`, not bare `$.path`. The path must point at something an earlier step wrote via `store_as`.
+JSONPath reads use `get('$.path')`, not bare `$.path`. Available roots:
 
-## `output_parser.json_schema` + `store_as`
+| Path | What |
+|---|---|
+| `$.output.<field>` | The **current step's own** structured output. (`$.output.text` for `output_parser: {"type": "default"}`.) Only available on the step that just ran — there's no cross-step slot store. |
+| `$.session.metadata.<key>` | Whatever the wrapper put in `session.metadata` at session create. |
+| `$.agent.metadata.<key>` | Whatever was put in `agent.metadata` at agent create. |
+| `$.tools.<tool_config_name>.outputs.latest.<field>` | The most recent invocation of that tool, this session. |
 
-`output_parser` does two things at once: constrain LLM output to a JSON schema, and write the parsed value to a named slot the rest of the session can reference.
+**No `$.<some_named_slot>`** — there is no `store_as` field on `output_parser`, and earlier steps do not write to a key-value store the rest of the session can address. If a downstream step needs to route on a value from an upstream step, the downstream step's structured output must re-emit it (the LLM has the conversation history and can do so). See the Quick Recipe above for the pattern.
+
+## `output_parser` shapes
+
+`output_parser` has two forms — pick one per step:
+
+- `{"type": "default"}` — free-form text. The agent's reply is the `agent_output` event. Inside the step's own `next_steps`, the text is at `get('$.output.text')`.
+- `{"type": "structured", "json_schema": {...}}` — the LLM must emit JSON conforming to the schema. The parsed value is emitted as a `structured_output` event and is available to the step's own `next_steps` at `$.output.<field>`.
 
 ```json
 "output_parser": {
@@ -266,12 +277,13 @@ JSONPath reads use `get('$.path')`, not bare `$.path`. The path must point at so
       "required": ["app", "sensitivity", "confidence"],
       "additionalProperties": false
     }
-  },
-  "store_as": "$.classification"
+  }
 }
 ```
 
-After this step runs, downstream steps can branch on `get('$.classification.app')`, reference `$.classification.sensitivity` in instructions, etc. Use `output_parser: {"type": "default"}` for free-form text steps that don't need to capture structured output.
+After this step runs, **this step's** `next_steps` can branch on `get('$.output.app')`, `get('$.output.sensitivity')`, etc. The output is **only addressable from the step that produced it** — there's no shared key-value store. If a later step needs to route on `app`, that later step's structured output must re-emit it (see the Quick Recipe above for the re-emit pattern).
+
+There is **no `store_as` field** — a common AI-generated hallucination. The API rejects it with `Unknown property`.
 
 ### Strict-mode rules
 
@@ -285,7 +297,7 @@ If you need optional fields or string-length validation, drop `strict: true` and
 
 ## Runtime-populated enum (constrained generation from a tool result)
 
-A common need: the LLM must pick from a list that's only known at runtime — role names from a permissions API, ticket categories from an ITSM, etc. Vectara's pattern is to write `enum` into the JSON schema but populate it dynamically from the prior tool call's stored result:
+A common need: the LLM must pick from a list that's only known at runtime — role names from a permissions API, ticket categories from an ITSM, etc. The pattern is: the same step calls the tool that produces the candidates, then emits a structured output whose `description` instructs the model to pick from the values the tool just returned.
 
 ```json
 "output_parser": {
@@ -298,7 +310,7 @@ A common need: the LLM must pick from a list that's only known at runtime — ro
       "properties": {
         "role_binding": {
           "type": "string",
-          "description": "Must be one of $.candidates. Enum is populated at runtime from the wolken_get_access_types result."
+          "description": "Must be one of the values returned this turn by wolken_get_access_types. Do not invent role names."
         }
       },
       "required": ["role_binding"],
@@ -308,7 +320,9 @@ A common need: the LLM must pick from a list that's only known at runtime — ro
 }
 ```
 
-The step's tool fetches the candidates (`wolken_get_access_types`), the instruction tells the LLM "store the result as `$.candidates`," and the structured output enforces the pick against that slot. Prevents hallucinated role names that look valid but don't exist.
+The instruction template for the step explicitly tells the LLM to call `wolken_get_access_types` first and pick from its result. The structured-output schema's `description` is the soft contract — combined with the fresh tool result in conversation context, it prevents hallucinated role names that look valid but don't exist.
+
+If you want the constraint to be **truly hard** (not soft per-prompt), the alternative is a 2-step pattern: a *fetch_candidates* step that calls the tool, then a *pick_role* step whose `json_schema` you generate dynamically with a literal `enum: [...]` before calling `POST /v2/agents` — but that's only feasible if the candidate list is stable enough to bake into the agent definition.
 
 ## Step-scoped tools via `allowed_tools`
 
@@ -601,7 +615,8 @@ Strict-mode schema validators may reject them — keep them out of any payload t
 ## Common mistakes to avoid
 
 - Putting transitions on the wrong step. `next_steps` lives on the step it's *leaving from*, not the target.
-- Reading a `store_as` slot before the step that writes it has run.
+- Adding a `store_as` field to `output_parser`. It doesn't exist — the API rejects with `Unknown property`. Read the step's own output via `$.output.<field>`; re-emit fields downstream steps need to route on.
+- Reading another step's output by name from `next_steps` (e.g. `get('$.gather.app_key')` from a different step). Only `$.output` (current step), `$.session.metadata`, `$.agent.metadata`, and `$.tools.<name>.outputs.latest` are addressable.
 - Hard-coding an enum the model can't trust — use the runtime-populated-enum pattern.
 - Trusting prompt-based "don't call this tool" instead of removing the tool from `allowed_tools`.
 - Registering a connector inside the agent JSON (the connectors API is separate — `POST /v2/agents/{key}/connectors`).
