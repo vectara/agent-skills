@@ -463,11 +463,11 @@ A step can be designed to *wait* for an external signal — e.g. `manager_gate` 
 ```bash
 POST /v2/agents/{intake_agent_key}/sessions/{intake_session_key}/events
 {
-  "type": "input_message",
   "messages": [{
     "type": "text",
     "content": "approval_status_update: approved by bob.kerns@csg.com, wolken_ticket_id=WLK-48211"
-  }]
+  }],
+  "stream_response": false
 }
 ```
 

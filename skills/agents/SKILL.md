@@ -87,7 +87,7 @@ For multi-step workflows, add more entries to `steps` and use `next_steps` on ea
 | Sub-agent | `sub_agent` | Delegate to another agent |
 | Lambda | `lambda` | Run custom Python functions |
 | Document Conversion | built-in | Convert PDF/DOCX/PPTX to markdown |
-| Structured Indexing | built-in | Index a converted artifact into a corpus |
+| Structured Indexing | `structured_document_index` | Index a document (with sections, metadata, table/image `artifact_id` refs) into a corpus while preserving structure |
 | MCP | `mcp` | External tool servers via Model Context Protocol |
 | Dynamic Vectara | `dynamic_vectara` | Vectara-shipped built-in (e.g. `tol_vectara_slack_post_message`) |
 
@@ -167,7 +167,7 @@ curl -s -H "x-api-key: $API_KEY" \
 
 ## Creating Lambda Tools
 
-Lambda tools are custom Python functions that agents can call. They run in a sandboxed Python 3.12 runtime — no network, no filesystem writes, no `pip install`, no system commands. Allowed stdlib modules: `json`, `math`, `datetime`, `collections`, `itertools`, `functools`, `re`, `time`, `typing`.
+Lambda tools are custom Python functions that agents can call. They run in a sandboxed Python 3.12 runtime — no network, no filesystem writes, no `pip install`, no system commands. Pre-installed modules include the common stdlib (`json`, `math`, `datetime`, `collections`, `itertools`, `functools`, `re`, `time`, `typing`) plus the data-science staples `pandas` and `numpy` (notebook 7 imports both at the top of `process`). For anything not pre-installed, the right answer is a separate service called via `web_get`, not a lambda.
 
 **Two rules that make the rest work:**
 
@@ -341,9 +341,9 @@ curl -s -X POST "https://api.vectara.io/v2/agents/$AGENT_KEY/sessions/$SESSION_K
 # 4. Ask the agent — it picks document_conversion / artifact_grep itself
 curl -s -X POST "https://api.vectara.io/v2/agents/$AGENT_KEY/sessions/$SESSION_KEY/events" \
   -H "x-api-key: $API_KEY" -H "Content-Type: application/json" \
-  -d '{"type": "input_message",
-       "messages": [{"type": "text",
-                     "content": "Grep the uploaded report for revenue figures and summarize Q4 outlook."}]}'
+  -d '{"messages": [{"type": "text",
+                      "content": "Grep the uploaded report for revenue figures and summarize Q4 outlook."}],
+       "stream_response": false}'
 ```
 
 ### Artifacts — common mistakes
@@ -467,8 +467,8 @@ curl -s -X POST https://api.vectara.io/v2/agents/$AGENT_KEY/sessions/$SESSION_KE
   -H "x-api-key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "type": "input_message",
-    "messages": [{"type": "text", "content": "Your question here"}]
+    "messages": [{"type": "text", "content": "Your question here"}],
+    "stream_response": false
   }'
 ```
 
@@ -483,7 +483,7 @@ When you POST to `/events`, the response (or SSE stream, with `stream_response: 
 | `input_message` | Echo of the user's input | `content` |
 | `thinking` | Mid-turn reasoning chunk | `content` |
 | `tool_input` | The agent decided to call a tool | `tool_configuration_name`, `content` (the input args the LLM constructed) |
-| `tool_output` | Tool returned | `tool_configuration_name`, `content`. Corpus search results live at `tool_output.search_results` (not `.results`). For `web_get`, `content.status_code` and `content.content` carry the response body |
+| `tool_output` | Tool returned | `tool_configuration_name` plus a `tool_output` dict on the event. For `web_get`, `event.tool_output.status_code` and `event.tool_output.content` carry the response status and body. For `corpora_search`, results live at `event.tool_output.search_results` (not `.results`). |
 | `agent_output` | Terminal free-form reply (steps with `output_parser: {"type": "default"}`) | `content` |
 | `structured_output` | Terminal structured reply (steps with `output_parser: {"type": "structured"}`) | `step_name`, `schema_name`, `content` (the parsed dict) |
 | `step_transition` | Step-machine transition fired | `from_step`, `to_step` |
@@ -596,7 +596,7 @@ The full reference implementation (with the same retry posture for bulk corpus-d
 - Pinning a single header in `argument_override.headers` and expecting other headers the LLM sets to be merged in — the dict is **replace, not merge**. Pin every header you care about together, or leave the field unset
 - Sending messages without creating a session first
 - Putting `limit` inside `corpora[]` instead of in `search{}`
-- Looking for `tool_output.results` instead of `tool_output.search_results` for corpus search
+- Looking for `event.tool_output.results` instead of `event.tool_output.search_results` for corpus search
 - Not enabling `generation.enabled: true` in query_configuration when you want RAG summaries
 
 ## References
