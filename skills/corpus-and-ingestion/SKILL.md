@@ -301,9 +301,20 @@ curl -X DELETE "https://api.vectara.io/v2/corpora/$CORPUS_KEY/documents?async=fa
 - `document_ids` accepts up to 10,000 IDs per request and deletes from primary storage (no indexing-lag risk).
 - `metadata_filter` deletes against the search index — recently indexed documents may be missed. For mission-critical wipes, prefer `document_ids` or repeat the filter-based call after the indexing pipeline catches up.
 
-### Per-document iteration with retry (full-clear pattern)
+### Truncate a corpus (clear everything, keep the corpus)
 
-When you need to clear *every* document and want resilience to transient gateway errors, iterate the list endpoint and DELETE each id with a small retry loop on `502`/`503`/`504` and `RequestException`. A single network blip on one DELETE shouldn't kill the whole sweep:
+For "delete every document, but keep the corpus and its configuration," use the dedicated reset endpoint — one call, no iteration, no async job tracking:
+
+```bash
+curl -X POST "https://api.vectara.io/v2/corpora/$CORPUS_KEY/reset" \
+  -H "x-api-key: $VECTARA_API_KEY"
+```
+
+Returns `204` on success. Filter attributes, encoder choice, and other corpus settings are preserved; the document storage and search index are wiped. Use this — not the per-document iteration below — whenever the goal is "start fresh."
+
+### Per-document iteration with retry (filtered cleanup)
+
+When you need a *partial* sweep — delete only documents matching some criterion the bulk-delete `metadata_filter` doesn't express, or you want per-document error handling — iterate the list endpoint and DELETE each id with a small retry loop on `502`/`503`/`504` and `RequestException`. A single network blip on one DELETE shouldn't kill the whole sweep:
 
 ```python
 import time, requests
@@ -475,6 +486,7 @@ Append `.md` to any Vectara docs URL to get the markdown source.
 - [Replace document metadata](https://docs.vectara.com/docs/rest-api/replace-corpus-document-metadata) — `replace-corpus-document-metadata.md`
 - [Replace filter attributes](https://docs.vectara.com/docs/rest-api/replace-filter-attributes) — `replace-filter-attributes.md`
 - [Bulk delete documents](https://docs.vectara.com/docs/rest-api/bulk-delete-corpus-documents) — `bulk-delete-corpus-documents.md`
+- [Reset corpus (truncate)](https://docs.vectara.com/docs/rest-api/reset-corpus) — `reset-corpus.md`
 - [Compute corpus size](https://docs.vectara.com/docs/rest-api/compute-corpus-size) — `compute-corpus-size.md`
 - [List table extractors](https://docs.vectara.com/docs/rest-api/list-table-extractors) — `list-table-extractors.md`
 - [OpenAPI spec](https://api.vectara.io/v2/openapi.json)

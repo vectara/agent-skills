@@ -441,7 +441,6 @@ Whatever you set in the schedule's `session_metadata` object lands on every sess
 
 ### Schedules — common mistakes
 
-- **Treating the list endpoint as strongly consistent.** Schedule creation is eventually consistent — `GET .../schedules` may not show a just-created schedule for a few seconds. Poll with a short backoff instead of asserting on the first read.
 - **Creating with `enabled: true` while iterating.** An interval schedule can fire before you've confirmed the config is right. Always create disabled, then `PATCH` to enable.
 - **Using interval shorter than `PT1H`.** That's the platform minimum for `schedule.interval`. Use cron for sub-hourly cadences only if your plan supports it.
 - **Forgetting cron is UTC.** `0 9 * * 1-5` is 9 AM UTC weekdays, not 9 AM local time. Convert before writing the expression.

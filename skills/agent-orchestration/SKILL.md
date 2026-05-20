@@ -204,7 +204,7 @@ A multi-step agent has `first_step_name` (a string pointing at the entry) and `s
 
 A step with no `next_steps` is terminal — the agent loop ends after it.
 
-A single user turn can chain up to **500** transitions before the platform raises a `step_transition_limit_exceeded` event and stops. Real workflows rarely exceed a dozen — that ceiling is a safety net for accidental loops, not a budget to spend.
+A single agent turn can chain up to **500** transitions before the platform raises a `step_transition_limit_exceeded` event and stops. Real workflows rarely exceed a dozen — that ceiling is a safety net for accidental loops, not a budget to spend.
 
 ## `reentry_step` — where the next turn lands
 
