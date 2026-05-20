@@ -147,7 +147,7 @@ curl -s -H "x-api-key: $API_KEY" \
       },
       "reranker": {
         "type": "customer_reranker",
-        "reranker_id": "rnk_272725719"
+        "reranker_name": "Rerank_Multilingual_v1"
       }
     }
   }
@@ -167,7 +167,7 @@ curl -s -H "x-api-key: $API_KEY" \
 
 ## Creating Lambda Tools
 
-Lambda tools are custom Python functions that agents can call. They run in a sandboxed Python 3.12 runtime — no network, no filesystem writes, no `pip install`, no system commands. Pre-installed modules include the common stdlib (`json`, `math`, `datetime`, `collections`, `itertools`, `functools`, `re`, `time`, `typing`) plus the data-science staples `pandas` and `numpy` (notebook 7 imports both at the top of `process`). For anything not pre-installed, the right answer is a separate service called via `web_get`, not a lambda.
+Lambda tools are custom Python functions that agents can call. They run in a sandboxed Python 3.12 runtime — no network, no filesystem writes, no `pip install`, no system commands. Pre-installed modules include the common stdlib (`json`, `math`, `datetime`, `collections`, `itertools`, `functools`, `re`, `time`, `typing`) plus the data-science staples `pandas` and `numpy`. For anything else, the right answer is a separate service called via `web_get`, not a lambda.
 
 **Two rules that make the rest work:**
 
@@ -485,11 +485,12 @@ When you POST to `/events`, the response (or SSE stream, with `stream_response: 
 | `tool_input` | The agent decided to call a tool | `tool_configuration_name`, `content` (the input args the LLM constructed) |
 | `tool_output` | Tool returned | `tool_configuration_name` plus a `tool_output` dict on the event. For `web_get`, `event.tool_output.status_code` and `event.tool_output.content` carry the response status and body. For `corpora_search`, results live at `event.tool_output.search_results` (not `.results`). |
 | `agent_output` | Terminal free-form reply (steps with `output_parser: {"type": "default"}`) | `content` |
-| `structured_output` | Terminal structured reply (steps with `output_parser: {"type": "structured"}`) | `step_name`, `schema_name`, `content` (the parsed dict) |
+| `structured_output` | Terminal structured reply (steps with `output_parser: {"type": "structured"}`) | `schema_name`, `content` (the parsed dict). To attribute it to a step, correlate by the preceding `step_transition.to_step` or by `schema_name` |
 | `step_transition` | Step-machine transition fired | `from_step`, `to_step` |
-| `step_transition_limit_exceeded` | Safety limit tripped — a turn chained more than 500 transitions | `count` |
+| `step_transition_limit_exceeded` | Safety limit tripped — a turn chained more than 500 transitions | `transition_limit` (the cap), `message` |
 | `skill_load` | A skill's `content` was injected into context (either model-driven via `invoke_skill` or client-driven via `{"type":"skill"}` input) | `skill_name` |
 | `artifact_upload` | Multipart file was attached to the session via `POST /events` | `artifacts[]` (each has `artifact_id`) |
+| `image_read` | An image artifact was loaded into context (e.g. via the `image_read` tool) | `artifact_id`, `detail` (`auto` / `low` / `high`) |
 | `streaming_agent_output` | Per-chunk free-form text while streaming. Only with `stream_response: true` | `content` |
 | `streaming_agent_output_end` | End-of-stream marker | — |
 
@@ -593,7 +594,7 @@ The full reference implementation (with the same retry posture for bulk corpus-d
 - Using `corpus_id` (number) instead of `corpus_key` (string)
 - Using the deprecated top-level `first_step` field instead of `first_step_name` + `steps{}` map
 - Forgetting `output_parser: {"type": "default"}` on the entry step
-- Pinning a single header in `argument_override.headers` and expecting other headers the LLM sets to be merged in — the dict is **replace, not merge**. Pin every header you care about together, or leave the field unset
+- Pinning a single header with the nested form `argument_override: {"headers": {"Authorization": "..."}}` and expecting the LLM to still set `Accept` / `Content-Type`. The whole `headers` property gets hidden from the LLM's tool schema and your one pinned header is the only one that goes out. To pin one header while leaving siblings open to the LLM, use a dot-notation key at the override top level: `argument_override: {"headers.Authorization": {"$ref": "agent.secrets.api_key"}}`. See `vectara-agent-auth-and-secrets` for the full pattern
 - Sending messages without creating a session first
 - Putting `limit` inside `corpora[]` instead of in `search{}`
 - Looking for `event.tool_output.results` instead of `event.tool_output.search_results` for corpus search
