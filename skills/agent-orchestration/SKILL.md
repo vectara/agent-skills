@@ -204,6 +204,32 @@ A multi-step agent has `first_step_name` (a string pointing at the entry) and `s
 
 A step with no `next_steps` is terminal — the agent loop ends after it.
 
+A single user turn can chain up to **500** transitions before the platform raises a `step_transition_limit_exceeded` event and stops. Real workflows rarely exceed a dozen — that ceiling is a safety net for accidental loops, not a budget to spend.
+
+## `reentry_step` — where the next turn lands
+
+By default, the next user message in the same session re-enters at whatever step the previous turn ended on. Set `reentry_step` on a step to override that — useful for *plan-once, then chat about the result* workflows.
+
+```json
+"steps": {
+  "flag_issues": {
+    "instructions": [{"type": "inline", "name": "flag", "template": "..."}],
+    "output_parser": {"type": "default"},
+    "reentry_step": "qa"
+  },
+  "qa": {
+    "instructions": [{"type": "inline", "name": "qa", "template": "Answer follow-up questions using only the conversation history. Do not re-run extraction."}],
+    "output_parser": {"type": "default"},
+    "allowed_tools": [],
+    "reentry_step": "qa"
+  }
+}
+```
+
+What this gives you: turn 1 runs the full `classify → extract → flag_issues` pipeline (whatever the entry chain is), and `flag_issues` redirects subsequent turns into `qa`. Turn 2 lands directly in `qa` with the prior classification, extraction, and flag report in conversation history — no pipeline re-run. Setting `reentry_step: "qa"` on `qa` itself keeps follow-ups looping back to Q&A indefinitely.
+
+Pair with `allowed_tools: []` on the Q&A step to make sure the model can't accidentally re-trigger an upstream tool from a follow-up question.
+
 ## Conditional `next_steps` via JSONPath
 
 `next_steps` is evaluated top-to-bottom. Each entry has an optional `condition` (a JSONPath-expression-with-comparators) and a `step_name`. The first matching condition wins; the final entry with no `condition` is the default:
