@@ -380,6 +380,8 @@ print(f"Agent: {agent.key}")
 
 The `tool_configurations` map keys can be anything — `corpora_search`, `knowledge_base`, `web` — they're tool *handles* the LLM sees. The value's `type`-shaped model determines what kind of tool it is.
 
+> **SDK lag vs. REST API.** The current Python SDK only supports a **single step** via the `first_step=FirstAgentStep(...)` parameter — the SDK docs explicitly note multi-step workflows are not yet supported. The REST API (covered in `vectara-agents`) has moved on to `first_step_name` + a `steps{}` map for true multi-step state machines (`vectara-agent-orchestration`). If you need state machines, sub-agents, `reentry_step`, or `allowed_skills`, call the REST API directly (or via `client._client_wrapper` / a thin `httpx` layer) until the SDK catches up. The `name="main"` on `FirstAgentStep` is the SDK-side analog of `first_step_name`.
+
 ### Create a session and post a message
 
 ```python

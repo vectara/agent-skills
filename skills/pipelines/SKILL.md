@@ -344,7 +344,7 @@ Doc pages — append `.md` to any `https://docs.vectara.com/docs/...` URL to fet
 - [Delete dead letter](https://docs.vectara.com/docs/rest-api/delete-pipeline-dead-letter-entry.md) — `DELETE /v2/pipelines/{key}/dead_letters/{id}`
 
 ### Related skills
-- `vectara-agents` — building the agent the pipeline targets (tool config, first_step, sessions).
+- `vectara-agents` — building the agent the pipeline targets (tool config, `first_step_name` + `steps{}`, sessions).
 - `vectara-agent-orchestration` — multi-step worker agents and judge-agent structured output.
 
 ### API reference

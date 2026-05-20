@@ -1,6 +1,6 @@
 ---
 name: vectara-agent-orchestration
-description: Build multi-step, deterministic, step-gated Vectara agents. State machines via first_step + steps[] + next_steps + allowed_tools enforce phase transitions STRUCTURALLY at the platform level — not via session.metadata variables read by a single-step LLM prompt. Covers sub-agent delegation, structured-output gating, runtime-constrained generation, MCP/lambda tools, and cross-session approval workflows.
+description: Build multi-step, deterministic, step-gated Vectara agents. State machines via first_step_name + steps{} map + next_steps + allowed_tools enforce phase transitions STRUCTURALLY at the platform level — not via session.metadata variables read by a single-step LLM prompt. Covers sub-agent delegation, structured-output gating (output_parser type "structured" with strict JSON schema), runtime-constrained generation, MCP/lambda tools, reentry_step for follow-up turns, and cross-session approval workflows.
 tags: [vectara, agents, orchestration, multi-step, state-machine, deterministic, step-gating, sub-agent, workflow, approval]
 compatibility: [claude-code, cursor, copilot, cline, windsurf, gemini]
 ---
