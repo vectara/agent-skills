@@ -140,7 +140,7 @@ Filters reference declared metadata at document level (`doc.<name>`) or part lev
 
 | `type` | Use when | Key params |
 |---|---|---|
-| `customer_reranker` | Always — Slingshot, the multilingual neural reranker. The strongest single relevance signal Vectara ships. | `reranker_name: "Rerank_Multilingual_v1"`, `cutoff` (start at 0.5), `limit`, `include_context` (default `true`), `instructions` |
+| `customer_reranker` | Always — Vectara's neural rerankers. The strongest single relevance signal Vectara ships. | `reranker_name` (see below), `cutoff` (start at 0.5), `limit`, `include_context` (default `true`), `instructions` (only honored by instruction-following rerankers) |
 | `mmr` | After the neural reranker, to dedupe near-duplicate passages. | `diversity_bias` (0.0–1.0, start at 0.3), `limit`, `cutoff` |
 | `userfn` | Business signal: recency, popularity, geographic proximity, promoted flags. Also: `user_function: "knee()"` for auto-cutoff. | `user_function` (string expression), `limit`, `cutoff` |
 | `chain` | The recommended production setup. Combine 2–3 stages: neural → MMR → optional UDF. | `rerankers: [...]` (up to 50) |
@@ -148,7 +148,7 @@ Filters reference declared metadata at document level (`doc.<name>`) or part lev
 
 `reranker_id` / `rnk_272725719` are deprecated — always use `type: "customer_reranker"` with `reranker_name`.
 
-### customer_reranker (Slingshot multilingual)
+### customer_reranker — neural rerankers
 
 ```json
 {
@@ -157,13 +157,64 @@ Filters reference declared metadata at document level (`doc.<name>`) or part lev
     "reranker_name": "Rerank_Multilingual_v1",
     "cutoff": 0.5,
     "limit": 50,
-    "include_context": true,
-    "instructions": "Prefer policy documents over marketing material."
+    "include_context": true
   }
 }
 ```
 
-Normalized 0.0–1.0 scores. `cutoff: 0.5` is the recommended default; below `0.3` noise leaks in, above `0.7` zero-result responses on real queries become common. `instructions` is only honored by instruction-following rerankers.
+Normalized 0.0–1.0 scores. `cutoff: 0.5` is the recommended default; below `0.3` noise leaks in, above `0.7` zero-result responses on real queries become common.
+
+#### `reranker_name` values
+
+| `reranker_name` | Multilingual | Honors `instructions` | Notes |
+|---|---|---|---|
+| `Rerank_Multilingual_v1` | Yes | No | Slingshot, the default multilingual neural reranker. |
+| `slingshot` | Yes | No | Shorthand alias for `Rerank_Multilingual_v1`. Interchangeable. |
+| `qwen3-reranker` | Yes | **Yes** | Instruction-following reranker — pass an `instructions` string to steer ranking by user role, content type, or domain priority. See "Reranker instructions" below. |
+
+`instructions` is silently ignored by `Rerank_Multilingual_v1` / `slingshot`. Reach for `qwen3-reranker` when you need that steering.
+
+### Reranker instructions (qwen3-reranker)
+
+`instructions` is a free-form string passed to an instruction-following reranker. The reranker reads it as guidance on what "relevant" means for *this* query — user role, content-type preference, prioritize-X-over-Y rules. Same query, same corpora, same candidate set: the instruction alone changes which results rise to the top.
+
+**When to use it.** The right documents are *in* your candidate set (verify with `reranker: {"type": "none"}` first) but the wrong subset is winning the top-N. Common triggers — multiple user personas hitting one corpus, mixed content types where one dominates retrieval, or a saturated baseline where vector retrieval is locked onto one slice of the corpus.
+
+#### Pattern — role-based intent steering
+
+Two users with the same question want different answers. Tag the reranker with the user's role:
+
+```json
+{
+  "reranker": {
+    "type": "customer_reranker",
+    "reranker_name": "qwen3-reranker",
+    "limit": 100,
+    "cutoff": 0.2,
+    "instructions": "The user is an academic researcher writing a survey paper. Prioritize peer-reviewed academic research papers with novel techniques, experiments, and benchmark results. Deprioritize product documentation and tutorials."
+  }
+}
+```
+
+Developer-facing variant against the same corpora:
+
+```json
+"instructions": "The user is a software developer building a production search application. Prioritize practical implementation guides, API reference, configuration options, and code examples. Deprioritize academic theory and research papers."
+```
+
+Same query, same corpus, only the `instructions` changes — and the top-5 churns substantially between runs.
+
+#### Pattern — pulling a minority subset into the top-N
+
+When vector retrieval is dominated by one content type and the user actually needs the other, `instructions` can pull the minority side up without touching the query, corpora, or retrieval layer. Useful when the right doc class is buried at rank 20–50 but never enters the top-5.
+
+#### Writing effective instructions
+
+- **Name the user and the goal.** `"The user is a [role] doing [task]. Prioritize [content traits]. Deprioritize [content traits]."` Both halves matter — the explicit deprioritization creates room in the top-N.
+- **Describe content traits, not document IDs.** "Peer-reviewed papers with experiments" or "API reference and code examples," not "everything from corpus X." For corpus-level routing, use `metadata_filter` instead.
+- **Pair with a cutoff.** Instructions reorder; the cutoff drops the long tail.
+- **One-word instructions ("research") give weak signal.** Specific role-and-goal phrasing wins.
+- **Don't use instructions to filter** ("only return results from 2024"). They're a soft ranking signal — use `metadata_filter` for hard constraints.
 
 ### chain — production pattern
 

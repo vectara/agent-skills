@@ -301,6 +301,59 @@ curl -X DELETE "https://api.vectara.io/v2/corpora/$CORPUS_KEY/documents?async=fa
 - `document_ids` accepts up to 10,000 IDs per request and deletes from primary storage (no indexing-lag risk).
 - `metadata_filter` deletes against the search index — recently indexed documents may be missed. For mission-critical wipes, prefer `document_ids` or repeat the filter-based call after the indexing pipeline catches up.
 
+### Truncate a corpus (clear everything, keep the corpus)
+
+For "delete every document, but keep the corpus and its configuration," use the dedicated reset endpoint — one call, no iteration, no async job tracking:
+
+```bash
+curl -X POST "https://api.vectara.io/v2/corpora/$CORPUS_KEY/reset" \
+  -H "x-api-key: $VECTARA_API_KEY"
+```
+
+Returns `204` on success. Filter attributes, encoder choice, and other corpus settings are preserved; the document storage and search index are wiped. Use this — not the per-document iteration below — whenever the goal is "start fresh."
+
+### Per-document iteration with retry (filtered cleanup)
+
+When you need a *partial* sweep — delete only documents matching some criterion the bulk-delete `metadata_filter` doesn't express, or you want per-document error handling — iterate the list endpoint and DELETE each id with a small retry loop on `502`/`503`/`504` and `RequestException`. A single network blip on one DELETE shouldn't kill the whole sweep:
+
+```python
+import time, requests
+
+_TRANSIENT = (502, 503, 504)
+
+def _request_with_retry(method, url, *, max_retries=2, **kwargs):
+    for attempt in range(max_retries + 1):
+        try:
+            r = requests.request(method, url, **kwargs)
+        except requests.exceptions.RequestException:
+            if attempt < max_retries:
+                time.sleep(2 ** attempt); continue
+            return None
+        if r.status_code in _TRANSIENT and attempt < max_retries:
+            time.sleep(2 ** attempt); continue
+        return r
+
+def clear_corpus_documents(base_url, headers, corpus_key, timeout=30):
+    page_key = None
+    deleted = 0
+    while True:
+        params = {"limit": 100, **({"page_key": page_key} if page_key else {})}
+        r = _request_with_retry("GET", f"{base_url}/corpora/{corpus_key}/documents",
+                                headers=headers, params=params, timeout=timeout)
+        if r is None or r.status_code != 200: return deleted
+        data = r.json()
+        for doc in data.get("documents", []):
+            dr = _request_with_retry("DELETE",
+                f"{base_url}/corpora/{corpus_key}/documents/{doc['id']}",
+                headers=headers, timeout=timeout)
+            if dr is not None and dr.status_code in (200, 204):
+                deleted += 1
+        page_key = data.get("metadata", {}).get("page_key")
+        if not page_key: return deleted
+```
+
+Same retry policy applies to idempotent (re)create for agents and tools — see `vectara-agents`. Reference implementation: [`vectara_utils.py`](https://github.com/vectara/example-notebooks/blob/main/notebooks/api-examples/vectara_utils.py).
+
 ## Replacing filter attributes on an existing corpus
 
 `POST /v2/corpora/{corpus_key}/replace_filter_attributes` with `{ "filter_attributes": [...] }`. The endpoint returns `200 { "job_id": "job_..." }` immediately. The new attribute set is not usable in filter expressions until the async re-index job completes — poll the Jobs API for status.
@@ -433,6 +486,7 @@ Append `.md` to any Vectara docs URL to get the markdown source.
 - [Replace document metadata](https://docs.vectara.com/docs/rest-api/replace-corpus-document-metadata) — `replace-corpus-document-metadata.md`
 - [Replace filter attributes](https://docs.vectara.com/docs/rest-api/replace-filter-attributes) — `replace-filter-attributes.md`
 - [Bulk delete documents](https://docs.vectara.com/docs/rest-api/bulk-delete-corpus-documents) — `bulk-delete-corpus-documents.md`
+- [Reset corpus (truncate)](https://docs.vectara.com/docs/rest-api/reset-corpus) — `reset-corpus.md`
 - [Compute corpus size](https://docs.vectara.com/docs/rest-api/compute-corpus-size) — `compute-corpus-size.md`
 - [List table extractors](https://docs.vectara.com/docs/rest-api/list-table-extractors) — `list-table-extractors.md`
 - [OpenAPI spec](https://api.vectara.io/v2/openapi.json)
