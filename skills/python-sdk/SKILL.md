@@ -363,7 +363,7 @@ agent = client.agents.create(
             ),
         ),
     },
-    model=AgentModel(name="gpt-4o"),
+    model=AgentModel(name="claude-sonnet-4-6"),
     first_step=FirstAgentStep(
         name="main",
         instructions=[

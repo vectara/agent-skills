@@ -40,7 +40,7 @@ Concrete answer to "how do I gate Gather → Access selection → App-specific r
 ```json
 {
   "name": "itsm-provisioning",
-  "model": { "name": "gpt-4o" },
+  "model": { "name": "claude-sonnet-4-6" },
 
   "tool_configurations": {
     "get_applications":      { "type": "mcp", "tool_id": "tol_itsm_get_applications" },
