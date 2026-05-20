@@ -25,9 +25,9 @@ If you find yourself reaching for any of these, **stop and re-read this skill fr
 
 | Anti-pattern Gemini and others reach for | Reality |
 |---|---|
-| A `system_prompt` field on the agent body, e.g. `PATCH /v2/agents/{key} { "system_prompt": "..." }` | **No such field.** Instructions live inside `first_step.instructions[].template` (and per-step `instructions[]` for additional steps). |
+| A `system_prompt` field on the agent body, e.g. `PATCH /v2/agents/{key} { "system_prompt": "..." }` | **No such field.** Instructions live inside `steps.<step_name>.instructions[].template` for each step (the agent's entry step is identified by `first_step_name`). |
 | Updating `session.metadata` mid-session with a per-turn endpoint | **Not supported.** `session.metadata` is sealed at session-create. There is no "update metadata between turns" endpoint. |
-| A `CURRENT_STEP` variable in `session.metadata` that the LLM "self-gates" on by reading text instructions like "only call tool X if CURRENT_STEP == 'phase_2'" | **Not a real pattern.** It's prompt-based gating, not structural. The LLM has every tool attached and can call any of them. The correct mechanism is the platform's actual state machine: `first_step` + `steps[]` + `next_steps` + per-step `allowed_tools`. |
+| A `CURRENT_STEP` variable in `session.metadata` that the LLM "self-gates" on by reading text instructions like "only call tool X if CURRENT_STEP == 'phase_2'" | **Not a real pattern.** It's prompt-based gating, not structural. The LLM has every tool attached and can call any of them. The correct mechanism is the platform's actual state machine: `first_step_name` + `steps{}` map + `next_steps` + per-step `allowed_tools`. |
 | A single-step agent with a long verbose prompt enumerating "STATE 1, STATE 2, STATE 3" | Either you have a state machine — in which case use `steps[]` so the platform enforces it — or you have one phase, in which case stop pretending it's a state machine. |
 | Hand-rolled "the wrapper application advances the state" logic | Vectara's agent loop *is* the conductor when `steps[]` is configured. The `next_steps` array on each step is evaluated automatically against `output_parser.store_as` slots and chooses the next step. The wrapper doesn't need to manage state. |
 

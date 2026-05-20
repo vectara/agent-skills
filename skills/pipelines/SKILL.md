@@ -252,7 +252,32 @@ Context available to the expression:
 }
 ```
 
-The judge agent must have a structured output parser on `first_step` whose schema declares exactly `success: boolean` and `reason: string` (both required). Pipeline create/update rejects judge agents that don't match this shape with `400 Bad Request`. The `reason` is surfaced in `error_message` on the resulting DLQ entry, so write it for a human to read.
+The judge agent's entry step must have a structured `output_parser` whose schema declares exactly `success: boolean` and `reason: string` (both required). Pipeline create/update rejects judge agents that don't match this shape with `400 Bad Request`. The `reason` is surfaced in `error_message` on the resulting DLQ entry, so write it for a human to read.
+
+```json
+"first_step_name": "judge",
+"steps": {
+  "judge": {
+    "instructions": [{ "type": "inline", "name": "judge", "template": "Inspect the worker session and decide success." }],
+    "output_parser": {
+      "type": "structured",
+      "json_schema": {
+        "name": "judge_verdict",
+        "strict": true,
+        "schema": {
+          "type": "object",
+          "properties": {
+            "success": { "type": "boolean" },
+            "reason":  { "type": "string" }
+          },
+          "required": ["success", "reason"],
+          "additionalProperties": false
+        }
+      }
+    }
+  }
+}
+```
 
 Use condition when success is a structural check; use a judge when it requires semantic reasoning ("did the agent actually summarize the contract or just paraphrase the title?"). Judges add a full extra agent session per record — much slower and more expensive.
 
@@ -282,7 +307,7 @@ Use condition when success is a structural check; use a judge when it requires s
 - **Confusing pipeline `status` with run `status`.** Pipeline = `initializing | active | paused | error`. Run = `running | completed | failed | cancelled`. A `completed` run with `records_failed: 17` is normal: the run ran fine, the agent threw on 17 records, and those are now in the DLQ.
 - **Deleting a pipeline expecting cleanup.** It removes the pipeline config and its DLQ entries; it does not delete the worker agent, the judge agent, or any of the (potentially thousands of) sessions those agents created. Those persist independently.
 - **Using PUT when PATCH would do.** PUT requires re-sending the entire body, including a credential block. PATCH lets you change one field. Use PATCH for routine updates; reserve PUT for full reshapes.
-- **Writing a judge agent without the exact output schema.** It must declare `success: boolean` and `reason: string`, both required, on the `first_step.output_parser.json_schema`. Anything else is rejected at pipeline create/update with `400`.
+- **Writing a judge agent without the exact output schema.** It must declare `success: boolean` and `reason: string`, both required, in the entry step's `output_parser` (`type: "structured"`, `json_schema.schema` shape — see the verification section). Anything else is rejected at pipeline create/update with `400`.
 - **Forgetting only one run runs at a time.** Both scheduled triggers (silently skipped) and manual/retry triggers (`409`) honor this. Stagger pipelines that target the same agent if you care about throughput.
 
 ## References

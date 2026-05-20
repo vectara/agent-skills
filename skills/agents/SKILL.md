@@ -14,7 +14,7 @@ You are helping a developer build with the Vectara platform. Vectara is an enter
 This skill covers basic agent creation, corpora search, and the 3-step chat flow. For anything beyond that, the sibling skills are more specific:
 
 - **`vectara-agent-auth-and-secrets`** — OAuth, API keys, service-account credentials, `web_get` native auth modes, `$ref` to `agent.secrets` / `session.metadata` / `agent.metadata`, dynamic tool management via `PATCH /v2/agents/{key}`. Use whenever a tool calls an external API that needs credentials.
-- **`vectara-agent-orchestration`** — multi-step state machines (`first_step` + `steps[]` + `next_steps`), structured-output gating, sub-agents, runtime-constrained generation, Slack/connector-driven workflows, two-agent gates for human-in-the-loop approvals. Use for anything more complex than a single conversational loop.
+- **`vectara-agent-orchestration`** — multi-step state machines (`first_step_name` + `steps{}` map + `next_steps`), structured-output gating, sub-agents, runtime-constrained generation, Slack/connector-driven workflows, two-agent gates for human-in-the-loop approvals. Use for anything more complex than a single conversational loop.
 
 ## API Reference
 
